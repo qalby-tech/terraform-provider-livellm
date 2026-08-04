@@ -27,19 +27,19 @@ terraform {
   }
 }
 
-provider "livellm" {
-  # api_key = "llc_…"   # or export LIVELLM_API_KEY
-}
-
-data "livellm_workspace" "this" {}
-
-output "workspace" {
-  value = data.livellm_workspace.this.name
-}
+provider "livellm" {} # export LIVELLM_API_KEY=llc_…
 ```
 
-The API key is **workspace-scoped**: one provider block manages exactly one
-workspace. Mint keys on the workspace's Integrations page.
+The key is all the configuration there is — no workspace name, nothing else
+to wire up. Mint keys on the workspace's API keys page.
+
+## Examples
+
+- [`examples/basic`](examples/basic) — provider setup + the optional
+  `livellm_workspace` data source (workspace facts, fail-fast auth check).
+- [`examples/preview`](examples/preview) — the planned v0.1 resource shapes:
+  a VM with an AI daemon, managed Postgres, write-only secrets, a wired
+  container app, an agent-driven browser.
 
 ## Development
 
