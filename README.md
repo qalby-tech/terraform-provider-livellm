@@ -37,9 +37,12 @@ to wire up. Mint keys on the workspace's API keys page.
 
 - [`examples/basic`](examples/basic) — provider setup + the optional
   `livellm_workspace` data source (workspace facts, fail-fast auth check).
-- [`examples/preview`](examples/preview) — the planned v0.1 resource shapes:
-  a VM with an AI daemon, managed Postgres, write-only secrets, a wired
-  container app, an agent-driven browser.
+- [`examples/preview`](examples/preview) — every planned resource shape, one
+  file per domain: VMs (terminal/desktop, AI daemons, stop-without-destroy),
+  browsers (agent-driven, Browser API, BYO), container apps (image and
+  build-from-git, volumes, secret_env), managed Postgres/Redis (backups,
+  public endpoints, DB-engineer agent), write-only secrets, AI provider
+  connections, and the workspace AI Master.
 
 ## Development
 
