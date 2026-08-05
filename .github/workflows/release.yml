@@ -4,7 +4,6 @@
 #
 # Secrets required:
 #   GPG_PRIVATE_KEY — ASCII-armored private signing key
-#   PASSPHRASE      — its passphrase
 name: release
 
 on:
