@@ -100,6 +100,9 @@ func (p *livellmProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewStorageResource,
 		NewContainerAppResource,
 		NewVMResource,
+		NewBrowserResource,
+		NewAgentMasterResource,
+		NewAIProviderResource,
 	}
 }
 

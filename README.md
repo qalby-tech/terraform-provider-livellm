@@ -61,13 +61,15 @@ Manage the core of a workspace as code today:
 | `livellm_container_app` | Container app from an image or a repo built on every push |
 | `livellm_storage` | Managed Postgres or Redis, backups, external TLS access |
 | `livellm_secret` | Workspace secret with a write-only value |
+| `livellm_browser` | Headless Chromium, optionally AI-driven |
+| `livellm_agent_master` | The workspace's orchestrator agent |
+| `livellm_ai_provider` | AI provider connection with a write-only key |
 
 Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`.
 
 Creates and updates wait until the resource is actually serving, and plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic rather than a raw
-HTTP error. Browsers, AI masters and provider connections are next — see
-[`examples/preview`](examples/preview) for their planned shapes.
+HTTP error. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
@@ -76,7 +78,6 @@ OpenTofu 1.11+.
 
 - [`examples/basic`](examples/basic) — provider setup plus the
   `livellm_workspace` data source.
-- [`examples/preview`](examples/preview) — the planned resource shapes: VMs
   (terminal/desktop, AI daemons), browsers, container apps (image or
   build-from-git), managed databases with backups, secrets, AI provider
   connections and the workspace AI Master.

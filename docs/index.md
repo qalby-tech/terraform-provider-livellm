@@ -51,13 +51,15 @@ configuration; keys are secrets.
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a repo built on every push |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
 | [`livellm_secret`](resources/secret.md) | Workspace secret with a write-only value |
+| [`livellm_browser`](resources/browser.md) | Headless Chromium, optionally AI-driven |
+| [`livellm_agent_master`](resources/agent_master.md) | The workspace's orchestrator agent |
+| [`livellm_ai_provider`](resources/ai_provider.md) | AI provider connection with a write-only key |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md).
 
 Creates and updates wait until the resource is actually serving; plan-pool
-exhaustion surfaces as a clear "raise your plan" diagnostic. Browsers, AI
-masters and provider connections are next.
+exhaustion surfaces as a clear "raise your plan" diagnostic. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.

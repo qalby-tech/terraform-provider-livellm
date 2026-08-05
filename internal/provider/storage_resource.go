@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -34,7 +36,7 @@ func (r *storageResource) Metadata(_ context.Context, req resource.MetadataReque
 	resp.TypeName = req.ProviderTypeName + "_storage"
 }
 
-func (r *storageResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "A managed database — Postgres or Redis — with optional scheduled backups and " +
 			"external TLS exposure. Credentials are write-only.",
@@ -122,6 +124,9 @@ func (r *storageResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
+		},
 	}
 }
 
@@ -138,6 +143,7 @@ func (r *storageResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 type storageModel struct {
+	Timeouts timeouts.Value `tfsdk:"timeouts"`
 	Name              types.String `tfsdk:"name"`
 	Engine            types.String `tfsdk:"engine"`
 	Version           types.String `tfsdk:"version"`
@@ -246,7 +252,9 @@ func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest
 		apiDiag(&resp.Diagnostics, "Cannot create database", err)
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	createTimeout, td := plan.Timeouts.Create(ctx, 10*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 	if err := waitReady(waitCtx, r.data.Client, plan.Name.ValueString(), false); err != nil {
 		resp.Diagnostics.AddError("Database did not become ready", err.Error())
@@ -348,7 +356,9 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 		apiDiag(&resp.Diagnostics, "Cannot update database", err)
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	createTimeout, td := plan.Timeouts.Create(ctx, 10*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 	if err := waitReady(waitCtx, r.data.Client, w.ID, false); err != nil {
 		resp.Diagnostics.AddError("Database did not become ready after update", err.Error())
@@ -368,7 +378,9 @@ func (r *storageResource) Delete(ctx context.Context, req resource.DeleteRequest
 		apiDiag(&resp.Diagnostics, "Cannot delete database", err)
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	deleteTimeout, td := state.Timeouts.Delete(ctx, 10*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, deleteTimeout)
 	defer cancel()
 	if err := waitGone(waitCtx, r.data.Client, state.Name.ValueString()); err != nil {
 		resp.Diagnostics.AddWarning("Deletion still in progress", err.Error())

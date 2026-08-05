@@ -139,6 +139,7 @@ type Workload struct {
 	VM      map[string]any `json:"vm,omitempty"`
 	Pod     map[string]any `json:"pod,omitempty"`
 	Storage map[string]any `json:"storage,omitempty"`
+	Browser map[string]any `json:"browser,omitempty"`
 }
 
 // Workloads returns the workspace spec's workloads list.
@@ -204,4 +205,46 @@ func (c *Client) SetSecret(ctx context.Context, path, value, note string) error 
 func (c *Client) DeleteSecret(ctx context.Context, path string) error {
 	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/secrets",
 		map[string]string{"path": path}, nil)
+}
+
+// --- AI master & providers --------------------------------------------------
+
+// Master returns the workspace's aiMaster spec block (nil when unset).
+func (c *Client) Master(ctx context.Context) (map[string]any, error) {
+	var w struct {
+		Spec struct {
+			AIMaster map[string]any `json:"aiMaster"`
+		} `json:"spec"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant", nil, &w); err != nil {
+		return nil, err
+	}
+	return w.Spec.AIMaster, nil
+}
+
+// SetMaster merge-patches ONLY the aiMaster block of the workspace spec —
+// workloads and everything else are untouched (omitempty on the wire).
+func (c *Client) SetMaster(ctx context.Context, spec map[string]any) error {
+	return c.do(ctx, http.MethodPut, "/v1/me/tenant", map[string]any{"aiMaster": spec}, nil)
+}
+
+// ConnectedProviders returns the connected AI provider ids.
+func (c *Client) ConnectedProviders(ctx context.Context) ([]string, error) {
+	var out struct {
+		Connected []string `json:"connected"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/providers", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Connected, nil
+}
+
+// ConnectProvider connects (or rotates the key of) an AI provider.
+func (c *Client) ConnectProvider(ctx context.Context, provider, apiKey string) error {
+	return c.do(ctx, http.MethodPost, "/v1/me/tenant/providers",
+		map[string]string{"provider": provider, "apiKey": apiKey}, nil)
+}
+
+func (c *Client) DisconnectProvider(ctx context.Context, provider string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/providers/"+provider, nil, nil)
 }

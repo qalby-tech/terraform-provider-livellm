@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -32,7 +34,7 @@ func (r *containerAppResource) Metadata(_ context.Context, req resource.Metadata
 	resp.TypeName = req.ProviderTypeName + "_container_app"
 }
 
-func (r *containerAppResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "A container app: run a prebuilt image, or point at a repo in the workspace's Git org " +
 			"and the platform builds and rolls it on every push. Exposed ports get public HTTPS hostnames.",
@@ -89,6 +91,7 @@ func (r *containerAppResource) Schema(_ context.Context, _ resource.SchemaReques
 			},
 		},
 		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
 			"secret_env": schema.ListNestedBlock{
 				Description: "Environment variables backed by workspace secrets — the value comes from the secret store at run time, never through Terraform.",
 				NestedObject: schema.NestedBlockObject{
@@ -134,6 +137,7 @@ type secretEnvModel struct {
 }
 
 type containerAppModel struct {
+	Timeouts timeouts.Value `tfsdk:"timeouts"`
 	Name      types.String `tfsdk:"name"`
 	Image     types.String `tfsdk:"image"`
 	SourceRepo types.String `tfsdk:"source_repo"`
@@ -248,12 +252,14 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 	// Build-from-source apps aren't ready until their first build lands —
-	// give them longer than plain image pulls.
-	timeout := 10 * time.Minute
+	// give them longer than plain image pulls (both overridable via timeouts).
+	def := 10 * time.Minute
 	if plan.SourceRepo.ValueString() != "" {
-		timeout = 20 * time.Minute
+		def = 20 * time.Minute
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	createTimeout, td := plan.Timeouts.Create(ctx, def)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 	if err := waitReady(waitCtx, r.data.Client, plan.Name.ValueString(), false); err != nil {
 		resp.Diagnostics.AddError("App did not become ready", err.Error())
@@ -325,7 +331,9 @@ func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRe
 		apiDiag(&resp.Diagnostics, "Cannot update container app", err)
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	createTimeout, td := plan.Timeouts.Create(ctx, 10*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 	if err := waitReady(waitCtx, r.data.Client, w.ID, false); err != nil {
 		resp.Diagnostics.AddError("App did not become ready after update", err.Error())
@@ -344,7 +352,9 @@ func (r *containerAppResource) Delete(ctx context.Context, req resource.DeleteRe
 		apiDiag(&resp.Diagnostics, "Cannot delete container app", err)
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	deleteTimeout, td := state.Timeouts.Delete(ctx, 10*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, deleteTimeout)
 	defer cancel()
 	if err := waitGone(waitCtx, r.data.Client, state.Name.ValueString()); err != nil {
 		resp.Diagnostics.AddWarning("Deletion still in progress", err.Error())

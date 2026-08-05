@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -37,7 +39,7 @@ func (r *vmResource) Metadata(_ context.Context, req resource.MetadataRequest, r
 	resp.TypeName = req.ProviderTypeName + "_vm"
 }
 
-func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "An Ubuntu VM — terminal or desktop. SSH login is write-only; exposed ports get " +
 			"public HTTPS hostnames; stopped keeps the disk while halting the machine.",
@@ -128,6 +130,7 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 			},
 		},
 		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
 			"port": schema.ListNestedBlock{
 				Description: "Exposed ports. HTTP ports get a public HTTPS hostname; tcp/udp ports get a raw address.",
 				NestedObject: schema.NestedBlockObject{
@@ -182,6 +185,7 @@ type aiDaemonModel struct {
 }
 
 type vmResourceModel struct {
+	Timeouts timeouts.Value `tfsdk:"timeouts"`
 	Name              types.String `tfsdk:"name"`
 	Desktop           types.Bool   `tfsdk:"desktop"`
 	CPUs              types.Int64  `tfsdk:"cpus"`
@@ -333,7 +337,9 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 			apiDiag(&resp.Diagnostics, "Cannot stop VM after create", err)
 		}
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	createTimeout, td := plan.Timeouts.Create(ctx, 15*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 	if err := waitReady(waitCtx, r.data.Client, plan.Name.ValueString(), plan.Stopped.ValueBool()); err != nil {
 		resp.Diagnostics.AddError("VM did not become ready", err.Error())
@@ -425,7 +431,9 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		apiDiag(&resp.Diagnostics, "Cannot update VM", err)
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	createTimeout, td := plan.Timeouts.Create(ctx, 15*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
 	if err := waitReady(waitCtx, r.data.Client, w.ID, plan.Stopped.ValueBool()); err != nil {
 		resp.Diagnostics.AddError("VM did not become ready after update", err.Error())
@@ -445,7 +453,9 @@ func (r *vmResource) Delete(ctx context.Context, req resource.DeleteRequest, res
 		apiDiag(&resp.Diagnostics, "Cannot delete VM", err)
 		return
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	deleteTimeout, td := state.Timeouts.Delete(ctx, 10*time.Minute)
+	resp.Diagnostics.Append(td...)
+	waitCtx, cancel := context.WithTimeout(ctx, deleteTimeout)
 	defer cancel()
 	if err := waitGone(waitCtx, r.data.Client, state.Name.ValueString()); err != nil {
 		resp.Diagnostics.AddWarning("Deletion still in progress", err.Error())
