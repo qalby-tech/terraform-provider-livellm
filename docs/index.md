@@ -12,10 +12,9 @@ The livellm provider manages a [livellm cloud](https://cloud.live-llm.com)
 workspace: reviewable, versioned, repeatable infrastructure — and a natural
 surface for AI agents to write.
 
-Authentication is a single workspace API key. The key **is** the workspace
-identity: there is no workspace name, project id or region to configure —
-each key manages exactly the workspace it was minted in. Mint keys on your
-workspace's [API keys page](https://cloud.live-llm.com/api-keys).
+Authentication is a single workspace API key — each key manages the
+workspace it was minted in. Mint keys on your workspace's
+[API keys page](https://cloud.live-llm.com/api-keys).
 
 ## Example Usage
 

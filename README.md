@@ -47,11 +47,9 @@ terraform plan
 
 ## Authentication
 
-A single workspace API key is all the configuration there is. The key **is**
-the workspace identity — there is no workspace name, project id or region to
-wire up; each key manages exactly the workspace it was minted in. Set it via
-the `LIVELLM_API_KEY` environment variable (recommended) or the provider's
-`api_key` attribute.
+Authenticate with a workspace API key — each key manages the workspace it
+was minted in. Set it via the `LIVELLM_API_KEY` environment variable
+(recommended) or the provider's `api_key` attribute.
 
 ## Status
 

@@ -16,6 +16,14 @@ resource "livellm_vm" "worker" {
     name = "api"
     port = 3000
   }
+
+  # Where the VM runs. Omit for automatic scheduling; pick a region to run
+  # on any of its hosts, or pin a specific host. Regions, hosts and live
+  # capacity come from the fleet endpoint (GET /v1/fleet/hosts).
+  placement {
+    strategy = "region" # auto | host | region
+    region   = "eu-1"
+  }
 }
 
 # ── A GUI Linux Desktop VM with an AI daemon ───────────────────────────────
