@@ -63,21 +63,23 @@ go build -o terraform-provider-livellm && cd examples/basic && terraform plan
 
 ## Publishing (Terraform Registry)
 
-The release pipeline is ready: pushing a `v*` tag builds, signs and publishes
-release assets via GitHub Actions, and the Registry ingests every future tag
-automatically. One-time setup (account-level, can't be automated):
+Releasing is one command: `git tag vX.Y.Z && git push origin vX.Y.Z`. The
+GitHub Actions release workflow builds per-platform zips, SHA256SUMS, a
+detached GPG signature and the registry manifest; the Registry ingests every
+tag automatically once the provider is published.
 
-1. Make this repo **public** — the Registry only indexes public repos.
-2. Generate a signing key and add it to the repo secrets:
-   ```sh
-   gpg --full-generate-key            # RSA 4096, no expiry, e.g. releases@live-llm.com
-   gpg --armor --export-secret-keys <KEY_ID>   # → secret GPG_PRIVATE_KEY
-   # the key's passphrase                      # → secret PASSPHRASE
-   gpg --armor --export <KEY_ID>               # public key, used in step 3
-   ```
-3. Sign in at registry.terraform.io with the qalby-tech GitHub org →
-   Settings → Signing keys → add the public key.
-4. Registry → Publish → Provider → pick this repo.
-5. Tag the release: `git tag v0.1.0 && git push origin v0.1.0`.
+One-time setup (done for v0.1.0, recorded for the next provider):
 
-Repeat releases are just step 5.
+1. Repo **public** — the Registry only indexes public repos.
+2. Repo secret `GPG_PRIVATE_KEY` = ASCII-armored private signing key
+   (RSA 4096, no passphrase — the workflow expects none).
+3. Registry publishing now lives in HCP Terraform: registry.terraform.io →
+   sign in with GitHub → "Start managing with HCP Terraform" →
+   Registry → **Public Namespaces** → claim the `qalby-tech` namespace
+   (GitHub-org ownership check) → add the **public** key under GPG Keys.
+4. Publish → Provider → pick this repo.
+
+Gotcha that cost a release: the key signing the release (repo secret) and
+the key registered in the namespace must be the same pair. A mismatched
+signature fails registry ingestion — verify locally with
+`gpg --verify …SHA256SUMS.sig …SHA256SUMS` before publishing.
