@@ -57,6 +57,8 @@ Early preview. Shipped today:
 
 - Provider configuration with a fail-fast credential check at plan time
 - `livellm_workspace` data source (workspace facts)
+- `livellm_vm` / `livellm_vms` data sources — live VM state: readiness, SSH
+  address and the real URL of every exposed port
 
 Typed resources — VMs, managed Postgres/Redis, container apps, browsers,
 write-only secrets and AI agents — are in active development. The

@@ -94,3 +94,35 @@ func (c *Client) MyWorkspace(ctx context.Context) (*Workspace, error) {
 	}
 	return &w, nil
 }
+
+// EndpointStatus is one exposed port on a workload: HTTP ports carry the
+// public HTTPS URL; raw TCP/UDP ports carry the host:port to connect to.
+type EndpointStatus struct {
+	Name string `json:"name"`
+	URL  string `json:"url,omitempty"`
+	TCP  bool   `json:"tcp,omitempty"`
+	Addr string `json:"addr,omitempty"`
+}
+
+// WorkloadStatus is the live view of one workload (GET /v1/me/tenant/status).
+type WorkloadStatus struct {
+	ID        string           `json:"id"`
+	Type      string           `json:"type"`
+	Phase     string           `json:"phase"`
+	Ready     bool             `json:"ready"`
+	SSH       string           `json:"ssh,omitempty"`
+	Endpoints []EndpointStatus `json:"endpoints,omitempty"`
+}
+
+type TenantStatus struct {
+	Workloads []WorkloadStatus `json:"workloads"`
+}
+
+// Status returns the live status of every workload in the key's workspace.
+func (c *Client) Status(ctx context.Context) (*TenantStatus, error) {
+	var st TenantStatus
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/status", nil, &st); err != nil {
+		return nil, err
+	}
+	return &st, nil
+}

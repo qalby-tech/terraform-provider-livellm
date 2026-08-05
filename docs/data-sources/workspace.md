@@ -21,12 +21,11 @@ data "livellm_workspace" "this" {}
 output "workspace" {
   value = data.livellm_workspace.this.name
 }
-
-# e.g. build the URL a VM's HTTP port will be served on
-output "app_url" {
-  value = "https://vm-1-${data.livellm_workspace.this.name}.cloud.live-llm.com"
-}
 ```
+
+For a VM's addresses — SSH, port URLs — use
+[`livellm_vm`](vm.md) / [`livellm_vms`](vms.md): the platform reports the
+real URLs, so there is never a reason to assemble hostnames by hand.
 
 ## Schema
 
