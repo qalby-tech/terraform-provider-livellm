@@ -41,6 +41,10 @@ terraform init
 terraform plan
 ```
 
+> **OpenTofu:** use the fully-qualified source
+> `registry.terraform.io/qalby-tech/livellm` until the provider is listed in
+> the OpenTofu registry — everything else works identically.
+
 ## Authentication
 
 A single workspace API key is all the configuration there is. The key **is**
