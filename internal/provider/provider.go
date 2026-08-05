@@ -95,9 +95,12 @@ func (p *livellmProvider) Configure(ctx context.Context, req provider.ConfigureR
 }
 
 func (p *livellmProvider) Resources(_ context.Context) []func() resource.Resource {
-	// v0.1 targets (see design doc): livellm_secret, livellm_storage,
-	// livellm_container_app, livellm_vm.
-	return nil
+	return []func() resource.Resource{
+		NewSecretResource,
+		NewStorageResource,
+		NewContainerAppResource,
+		NewVMResource,
+	}
 }
 
 func (p *livellmProvider) DataSources(_ context.Context) []func() datasource.DataSource {

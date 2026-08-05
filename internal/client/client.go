@@ -110,6 +110,7 @@ type WorkloadStatus struct {
 	Type      string           `json:"type"`
 	Phase     string           `json:"phase"`
 	Ready     bool             `json:"ready"`
+	Message   string           `json:"message,omitempty"`
 	SSH       string           `json:"ssh,omitempty"`
 	Endpoints []EndpointStatus `json:"endpoints,omitempty"`
 }
@@ -125,4 +126,82 @@ func (c *Client) Status(ctx context.Context) (*TenantStatus, error) {
 		return nil, err
 	}
 	return &st, nil
+}
+
+// --- Workloads --------------------------------------------------------------
+
+// Workload is one entry of the workspace spec's workloads list. Kind blocks
+// stay loose maps: each typed resource owns its own field mapping.
+type Workload struct {
+	ID      string         `json:"id"`
+	Type    string         `json:"type"`
+	Stopped bool           `json:"stopped,omitempty"`
+	VM      map[string]any `json:"vm,omitempty"`
+	Pod     map[string]any `json:"pod,omitempty"`
+	Storage map[string]any `json:"storage,omitempty"`
+}
+
+// Workloads returns the workspace spec's workloads list.
+func (c *Client) Workloads(ctx context.Context) ([]Workload, error) {
+	var w struct {
+		Spec struct {
+			Workloads []Workload `json:"workloads"`
+		} `json:"spec"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant", nil, &w); err != nil {
+		return nil, err
+	}
+	return w.Spec.Workloads, nil
+}
+
+// CreateWorkload posts a new workload of the given type; body is the kind's
+// flat field set (id included).
+func (c *Client) CreateWorkload(ctx context.Context, wtype string, body map[string]any) error {
+	return c.do(ctx, http.MethodPost, "/v1/me/tenant/workloads/"+wtype, body, nil)
+}
+
+// UpdateWorkload PUTs the full desired workload (the path id wins).
+func (c *Client) UpdateWorkload(ctx context.Context, id string, w Workload) error {
+	return c.do(ctx, http.MethodPut, "/v1/me/tenant/workloads/"+id, w, nil)
+}
+
+func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/workloads/"+id, nil, nil)
+}
+
+// --- Secrets ----------------------------------------------------------------
+
+// SecretMeta is one stored secret's metadata — values are write-only and
+// never returned by the API.
+type SecretMeta struct {
+	Path           string `json:"path"`
+	CurrentVersion int    `json:"currentVersion"`
+	UpdatedAt      string `json:"updatedAt"`
+}
+
+func (c *Client) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
+	var out struct {
+		Secrets []SecretMeta `json:"secrets"`
+	}
+	// The list endpoint returns a bare array in some builds and a wrapped
+	// object in others; try the wrapper first, fall back to the array.
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/secrets", nil, &out); err == nil && out.Secrets != nil {
+		return out.Secrets, nil
+	}
+	var arr []SecretMeta
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/secrets", nil, &arr); err != nil {
+		return nil, err
+	}
+	return arr, nil
+}
+
+// SetSecret writes a value at a path; every write is a new version.
+func (c *Client) SetSecret(ctx context.Context, path, value, note string) error {
+	return c.do(ctx, http.MethodPut, "/v1/me/tenant/secrets",
+		map[string]string{"path": path, "value": value, "note": note}, nil)
+}
+
+func (c *Client) DeleteSecret(ctx context.Context, path string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/secrets",
+		map[string]string{"path": path}, nil)
 }

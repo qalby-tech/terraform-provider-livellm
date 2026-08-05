@@ -53,17 +53,24 @@ was minted in. Set it via the `LIVELLM_API_KEY` environment variable
 
 ## Status
 
-Early preview. Shipped today:
+Manage the core of a workspace as code today:
 
-- Provider configuration with a fail-fast credential check at plan time
-- `livellm_workspace` data source (workspace facts)
-- `livellm_vm` / `livellm_vms` data sources — live VM state: readiness, SSH
-  address and the real URL of every exposed port
+| Resource | What it creates |
+|---|---|
+| `livellm_vm` | Ubuntu VM (terminal or desktop), ports, placement, optional AI agent |
+| `livellm_container_app` | Container app from an image or a repo built on every push |
+| `livellm_storage` | Managed Postgres or Redis, backups, external TLS access |
+| `livellm_secret` | Workspace secret with a write-only value |
 
-Typed resources — VMs, managed Postgres/Redis, container apps, browsers,
-write-only secrets and AI agents — are in active development. The
-[`examples/preview`](examples/preview) directory shows the planned
-configuration shapes, one file per domain.
+Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`.
+
+Creates and updates wait until the resource is actually serving, and plan-pool
+exhaustion surfaces as a clear "raise your plan" diagnostic rather than a raw
+HTTP error. Browsers, AI masters and provider connections are next — see
+[`examples/preview`](examples/preview) for their planned shapes.
+
+~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
+OpenTofu 1.11+.
 
 ## Examples
 
