@@ -77,10 +77,8 @@ OpenTofu 1.11+.
 ## Examples
 
 - [`examples/basic`](examples/basic) — provider setup plus the
-  `livellm_workspace` data source.
-  (terminal/desktop, AI daemons), browsers, container apps (image or
-  build-from-git), managed databases with backups, secrets, AI provider
-  connections and the workspace AI Master.
+  `livellm_workspace` data source. Full per-resource examples live in the
+  [registry documentation](https://registry.terraform.io/providers/qalby-tech/livellm/latest/docs).
 
 ## Developing the provider
 
