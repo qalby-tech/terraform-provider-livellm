@@ -170,6 +170,27 @@ func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/workloads/"+id, nil, nil)
 }
 
+// MachineState is the repo describing what a VM IS — its packages, services and
+// config. Terraform declares the machine's shape; this repo holds its insides,
+// so together they reproduce the machine rather than just its outline.
+type MachineState struct {
+	Repo     string `json:"repo"`
+	URL      string `json:"url"`
+	HeadSHA  string `json:"headSha"`
+	Exists   bool   `json:"exists"`
+	Declared bool   `json:"declared"`
+}
+
+// MachineState reads a VM's machine-state repo. Only VMs with an agent have
+// one; for anything else the platform answers with an error.
+func (c *Client) MachineState(ctx context.Context, id string) (*MachineState, error) {
+	var st MachineState
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/workloads/"+id+"/state", nil, &st); err != nil {
+		return nil, err
+	}
+	return &st, nil
+}
+
 // --- Secrets ----------------------------------------------------------------
 
 // SecretMeta is one stored secret's metadata — values are write-only and

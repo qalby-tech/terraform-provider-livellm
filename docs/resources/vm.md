@@ -57,6 +57,40 @@ resource "livellm_vm" "workstation" {
 }
 ```
 
+## Reproducible machines
+
+A VM with an agent also gets a **machine state** repo: the packages, services
+and config that make it what it is, kept as code. Terraform declares the
+machine's shape; that repo holds its insides. Together they mean a machine is
+reproducible rather than precious — destroy it, apply again, and the platform
+replays the repo onto the new machine as it boots.
+
+```terraform
+resource "livellm_vm" "builder" {
+  name      = "builder"
+  cpus      = 4
+  memory_gi = 8
+  disk_gi   = 40
+
+  username            = "dev"
+  password_wo         = var.vm_password
+  password_wo_version = 1
+
+  ai_daemon {
+    provider = "anthropic"
+    sudo     = true
+  }
+}
+
+# Where the machine's insides are described. Clone it, read it, review changes
+# to it — a push converges the machine.
+output "blueprint" { value = livellm_vm.builder.state_repo_url }
+```
+
+The repo outlives the VM on purpose: `terraform destroy` removes the machine
+and keeps its blueprint, so the next `apply` brings the same machine back.
+Nothing in Terraform state carries the machine's insides — the repo does.
+
 Placement is optional — by default LiveLLM picks the host:
 
 ```terraform
@@ -106,6 +140,8 @@ resource "livellm_vm" "eu" {
 - `ssh` (String) `host:port` to SSH into the VM.
 - `url` (String) The first exposed HTTP port's public HTTPS URL.
 - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`).
+- `state_repo` (String) Repo describing what this machine is. Null unless the VM has an agent.
+- `state_repo_url` (String) Browse URL for `state_repo`.
 
 ## Import
 

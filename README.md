@@ -74,6 +74,18 @@ HTTP error. Create/update timeouts are configurable per resource via the standar
 ~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
 
+## Machines come back whole
+
+This provider declares a VM's *shape*. What is *inside* the machine — packages,
+services, config — is kept as code in its machine state repo, surfaced as
+`state_repo` / `state_repo_url`. That repo outlives the machine on purpose, and
+the platform replays it onto a rebuilt one, so `destroy` followed by `apply`
+returns the same machine rather than an empty one with the same name.
+
+```hcl
+output "blueprint" { value = livellm_vm.dev.state_repo_url }
+```
+
 ## Examples
 
 - [`examples/basic`](examples/basic) — provider setup plus the

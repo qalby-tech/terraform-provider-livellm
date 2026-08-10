@@ -113,6 +113,16 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Optional:    true,
 				Description: "Region to schedule into (placement_strategy = \"region\").",
 			},
+			"state_repo": schema.StringAttribute{
+				Computed: true,
+				Description: "Git repo describing what this machine IS — its packages, services and config. " +
+					"Rebuilding the VM replays this repo onto it, so the machine comes back the same. " +
+					"Null unless the VM has an agent.",
+			},
+			"state_repo_url": schema.StringAttribute{
+				Computed:    true,
+				Description: "Browse URL for state_repo.",
+			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the VM is up (false while stopped)."},
 			"ssh":   schema.StringAttribute{Computed: true, Description: "host:port to SSH into the VM, as reported by the platform."},
 			"url":   schema.StringAttribute{Computed: true, Description: "The first exposed HTTP port's public HTTPS URL."},
@@ -201,6 +211,8 @@ type vmResourceModel struct {
 	PlacementHost     types.String `tfsdk:"placement_host"`
 	PlacementRegion   types.String `tfsdk:"placement_region"`
 	AIDaemon          types.Object `tfsdk:"ai_daemon"`
+	StateRepo         types.String `tfsdk:"state_repo"`
+	StateRepoURL      types.String `tfsdk:"state_repo_url"`
 	Ready             types.Bool   `tfsdk:"ready"`
 	SSH               types.String `tfsdk:"ssh"`
 	URL               types.String `tfsdk:"url"`
@@ -287,6 +299,7 @@ func vmSpec(ctx context.Context, m vmResourceModel, password string) map[string]
 
 func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
+	refreshMachineState(ctx, c, m)
 	st, err := statusOf(ctx, c, m.Name.ValueString())
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
@@ -314,6 +327,24 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 	list, d := types.ListValueFrom(ctx, epType, eps)
 	diags.Append(d...)
 	m.Endpoints = list
+}
+
+// refreshMachineState fills the machine-state attributes. Only a VM with an
+// agent has a blueprint repo, so for anything else these stay null rather than
+// empty — null says "not applicable", "" would say "none yet".
+func refreshMachineState(ctx context.Context, c *client.Client, m *vmResourceModel) {
+	m.StateRepo, m.StateRepoURL = types.StringNull(), types.StringNull()
+	if m.AIDaemon.IsNull() || m.AIDaemon.IsUnknown() {
+		return
+	}
+	ms, err := c.MachineState(ctx, m.Name.ValueString())
+	if err != nil || ms == nil || !ms.Exists {
+		return
+	}
+	m.StateRepo = types.StringValue(ms.Repo)
+	if ms.URL != "" {
+		m.StateRepoURL = types.StringValue(ms.URL)
+	}
 }
 
 func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

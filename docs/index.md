@@ -61,5 +61,17 @@ Data sources: [`livellm_workspace`](data-sources/workspace.md),
 Creates and updates wait until the resource is actually serving; plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
+## Machines are reproducible too
+
+Terraform declares a VM's *shape* — cores, memory, disk, ports. A VM with an
+agent additionally keeps its *insides* as code: the packages, services and
+config that make it that machine live in a
+[machine state](resources/vm.md#reproducible-machines) repo, and the platform
+replays that repo onto the machine whenever it is rebuilt.
+
+So `terraform destroy` followed by `terraform apply` returns the same machine
+rather than an empty one with the same name. The two halves together make a
+whole workspace reproducible from git.
+
 ~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
