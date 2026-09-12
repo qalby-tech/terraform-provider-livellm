@@ -1,7 +1,7 @@
 ---
 page_title: "livellm_vm Resource - livellm"
 description: |-
-  An Ubuntu VM — terminal or desktop — with ports, placement and an optional AI agent.
+  An Ubuntu VM — terminal or desktop — with ports and placement.
 ---
 
 # livellm_vm (Resource)
@@ -36,7 +36,7 @@ output "ssh" { value = livellm_vm.dev.ssh }
 output "api" { value = livellm_vm.dev.url }
 ```
 
-A GUI desktop with an AI agent that operates it:
+A GUI desktop, reachable over VNC from the console:
 
 ```terraform
 resource "livellm_vm" "workstation" {
@@ -49,47 +49,8 @@ resource "livellm_vm" "workstation" {
   username            = "dev"
   password_wo         = var.vm_password
   password_wo_version = 1
-
-  ai_daemon {
-    provider = "anthropic" # a provider connected on the Integrations page
-    sudo     = true
-  }
 }
 ```
-
-## Reproducible machines
-
-A VM with an agent also gets a **machine state** repo: the packages, services
-and config that make it what it is, kept as code. Terraform declares the
-machine's shape; that repo holds its insides. Together they mean a machine is
-reproducible rather than precious — destroy it, apply again, and the platform
-replays the repo onto the new machine as it boots.
-
-```terraform
-resource "livellm_vm" "builder" {
-  name      = "builder"
-  cpus      = 4
-  memory_gi = 8
-  disk_gi   = 40
-
-  username            = "dev"
-  password_wo         = var.vm_password
-  password_wo_version = 1
-
-  ai_daemon {
-    provider = "anthropic"
-    sudo     = true
-  }
-}
-
-# Where the machine's insides are described. Clone it, read it, review changes
-# to it — a push converges the machine.
-output "blueprint" { value = livellm_vm.builder.state_repo_url }
-```
-
-The repo outlives the VM on purpose: `terraform destroy` removes the machine
-and keeps its blueprint, so the next `apply` brings the same machine back.
-Nothing in Terraform state carries the machine's insides — the repo does.
 
 Placement is optional — by default LiveLLM picks the host:
 
@@ -128,11 +89,6 @@ resource "livellm_vm" "eu" {
   - `port` (Number, Required) Listener port inside the VM.
   - `tcp` (Boolean) Expose as a raw TCP address instead of HTTPS.
   - `udp` (Boolean) Expose as a raw UDP address.
-- `ai_daemon` (Block, Single) Attach an AI agent that operates the VM over SSH:
-  - `provider` (String) A connected AI provider id.
-  - `model` (String) Model id; defaults to the provider's recommendation.
-  - `sudo` (Boolean) Allow the agent passwordless sudo.
-  - `instructions` (String) Standing guidance for the agent.
 
 ### Read-Only
 
@@ -140,8 +96,6 @@ resource "livellm_vm" "eu" {
 - `ssh` (String) `host:port` to SSH into the VM.
 - `url` (String) The first exposed HTTP port's public HTTPS URL.
 - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`).
-- `state_repo` (String) Repo describing what this machine is. Null unless the VM has an agent.
-- `state_repo_url` (String) Browse URL for `state_repo`.
 
 ## Import
 

@@ -170,27 +170,6 @@ func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/workloads/"+id, nil, nil)
 }
 
-// MachineState is the repo describing what a VM IS — its packages, services and
-// config. Terraform declares the machine's shape; this repo holds its insides,
-// so together they reproduce the machine rather than just its outline.
-type MachineState struct {
-	Repo     string `json:"repo"`
-	URL      string `json:"url"`
-	HeadSHA  string `json:"headSha"`
-	Exists   bool   `json:"exists"`
-	Declared bool   `json:"declared"`
-}
-
-// MachineState reads a VM's machine-state repo. Only VMs with an agent have
-// one; for anything else the platform answers with an error.
-func (c *Client) MachineState(ctx context.Context, id string) (*MachineState, error) {
-	var st MachineState
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/workloads/"+id+"/state", nil, &st); err != nil {
-		return nil, err
-	}
-	return &st, nil
-}
-
 // --- Secrets ----------------------------------------------------------------
 
 // SecretMeta is one stored secret's metadata — values are write-only and
@@ -226,46 +205,4 @@ func (c *Client) SetSecret(ctx context.Context, path, value, note string) error 
 func (c *Client) DeleteSecret(ctx context.Context, path string) error {
 	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/secrets",
 		map[string]string{"path": path}, nil)
-}
-
-// --- AI master & providers --------------------------------------------------
-
-// Master returns the workspace's aiMaster spec block (nil when unset).
-func (c *Client) Master(ctx context.Context) (map[string]any, error) {
-	var w struct {
-		Spec struct {
-			AIMaster map[string]any `json:"aiMaster"`
-		} `json:"spec"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant", nil, &w); err != nil {
-		return nil, err
-	}
-	return w.Spec.AIMaster, nil
-}
-
-// SetMaster merge-patches ONLY the aiMaster block of the workspace spec —
-// workloads and everything else are untouched (omitempty on the wire).
-func (c *Client) SetMaster(ctx context.Context, spec map[string]any) error {
-	return c.do(ctx, http.MethodPut, "/v1/me/tenant", map[string]any{"aiMaster": spec}, nil)
-}
-
-// ConnectedProviders returns the connected AI provider ids.
-func (c *Client) ConnectedProviders(ctx context.Context) ([]string, error) {
-	var out struct {
-		Connected []string `json:"connected"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/providers", nil, &out); err != nil {
-		return nil, err
-	}
-	return out.Connected, nil
-}
-
-// ConnectProvider connects (or rotates the key of) an AI provider.
-func (c *Client) ConnectProvider(ctx context.Context, provider, apiKey string) error {
-	return c.do(ctx, http.MethodPost, "/v1/me/tenant/providers",
-		map[string]string{"provider": provider, "apiKey": apiKey}, nil)
-}
-
-func (c *Client) DisconnectProvider(ctx context.Context, provider string) error {
-	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/providers/"+provider, nil, nil)
 }

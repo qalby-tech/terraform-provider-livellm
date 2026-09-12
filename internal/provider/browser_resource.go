@@ -12,13 +12,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// livellm_browser — a headless Chromium browser, optionally driven by a
-// built-in AI agent (give it goals from the console or the task API).
+// livellm_browser — a headless Chromium browser with a live view and a CDP
+// endpoint, ready to be driven by your own automation.
 type browserResource struct {
 	data *providerData
 }
@@ -33,8 +32,7 @@ func (r *browserResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A headless Chromium browser. Add the ai_agent block and it becomes an autonomous " +
-			"browser agent — hand it goals from the console or the task API and review its trajectory step by step.",
+		Description: "A headless Chromium browser with a live view and a CDP endpoint for your own automation.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:    true,
@@ -51,18 +49,10 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Optional:    true,
 				Description: "Memory request, e.g. \"2Gi\".",
 			},
-			"ready":    schema.BoolAttribute{Computed: true, Description: "Whether the browser is up."},
+			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the browser is up."},
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
-			"ai_agent": schema.SingleNestedBlock{
-				Description: "The browser's built-in AI driver. The engine and vision handling are managed by the platform.",
-				Attributes: map[string]schema.Attribute{
-					"provider":     schema.StringAttribute{Optional: true, Description: "A connected AI provider id. Defaults to any connected provider."},
-					"model":        schema.StringAttribute{Optional: true, Description: "Model id; defaults to the provider's recommendation."},
-					"instructions": schema.StringAttribute{Optional: true, Description: "Standing guidance for the agent."},
-				},
-			},
 		},
 	}
 }
@@ -79,17 +69,10 @@ func (r *browserResource) Configure(_ context.Context, req resource.ConfigureReq
 	r.data = data
 }
 
-type browserAgentModel struct {
-	Provider     types.String `tfsdk:"provider"`
-	Model        types.String `tfsdk:"model"`
-	Instructions types.String `tfsdk:"instructions"`
-}
-
 type browserModel struct {
 	Name     types.String   `tfsdk:"name"`
 	CPU      types.String   `tfsdk:"cpu"`
 	Memory   types.String   `tfsdk:"memory"`
-	AIAgent  types.Object   `tfsdk:"ai_agent"`
 	Ready    types.Bool     `tfsdk:"ready"`
 	Timeouts timeouts.Value `tfsdk:"timeouts"`
 }
@@ -101,21 +84,6 @@ func browserSpec(ctx context.Context, m browserModel) map[string]any {
 	}
 	if v := m.Memory.ValueString(); v != "" {
 		spec["memory"] = v
-	}
-	if !m.AIAgent.IsNull() {
-		var a browserAgentModel
-		m.AIAgent.As(ctx, &a, basetypes.ObjectAsOptions{})
-		agent := map[string]any{"enabled": true}
-		if v := a.Provider.ValueString(); v != "" {
-			agent["provider"] = v
-		}
-		if v := a.Model.ValueString(); v != "" {
-			agent["model"] = v
-		}
-		if v := a.Instructions.ValueString(); v != "" {
-			agent["instructions"] = v
-		}
-		spec["aiAgent"] = agent
 	}
 	return spec
 }

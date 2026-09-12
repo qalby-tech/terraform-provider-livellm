@@ -18,7 +18,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 
@@ -26,7 +25,7 @@ import (
 )
 
 // livellm_vm — an Ubuntu VM (terminal or desktop), with ports, network
-// gating, placement, an optional AI daemon, and stop-without-destroy.
+// gating, placement and stop-without-destroy.
 type vmResource struct {
 	data *providerData
 }
@@ -113,16 +112,6 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Optional:    true,
 				Description: "Region to schedule into (placement_strategy = \"region\").",
 			},
-			"state_repo": schema.StringAttribute{
-				Computed: true,
-				Description: "Git repo describing what this machine IS — its packages, services and config. " +
-					"Rebuilding the VM replays this repo onto it, so the machine comes back the same. " +
-					"Null unless the VM has an agent.",
-			},
-			"state_repo_url": schema.StringAttribute{
-				Computed:    true,
-				Description: "Browse URL for state_repo.",
-			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the VM is up (false while stopped)."},
 			"ssh":   schema.StringAttribute{Computed: true, Description: "host:port to SSH into the VM, as reported by the platform."},
 			"url":   schema.StringAttribute{Computed: true, Description: "The first exposed HTTP port's public HTTPS URL."},
@@ -152,18 +141,6 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 					},
 				},
 			},
-			"ai_daemon": schema.SingleNestedBlock{
-				Description: "Attach an AI agent that operates this VM over SSH. The engine is selected automatically from the provider.",
-				Attributes: map[string]schema.Attribute{
-					"provider": schema.StringAttribute{Optional: true, Description: "A connected AI provider id (Integrations page). Required when the block is present."},
-					"model":    schema.StringAttribute{Optional: true, Description: "Model id; defaults to the provider's recommendation."},
-					"sudo":     schema.BoolAttribute{Optional: true, Description: "Allow the agent passwordless sudo."},
-					"instructions": schema.StringAttribute{
-						Optional:    true,
-						Description: "Standing guidance for the agent.",
-					},
-				},
-			},
 		},
 	}
 }
@@ -187,36 +164,26 @@ type vmPortModel struct {
 	UDP  types.Bool   `tfsdk:"udp"`
 }
 
-type aiDaemonModel struct {
-	Provider     types.String `tfsdk:"provider"`
-	Model        types.String `tfsdk:"model"`
-	Sudo         types.Bool   `tfsdk:"sudo"`
-	Instructions types.String `tfsdk:"instructions"`
-}
-
 type vmResourceModel struct {
-	Timeouts timeouts.Value `tfsdk:"timeouts"`
-	Name              types.String `tfsdk:"name"`
-	Desktop           types.Bool   `tfsdk:"desktop"`
-	CPUs              types.Int64  `tfsdk:"cpus"`
-	MemoryGi          types.Int64  `tfsdk:"memory_gi"`
-	DiskGi            types.Int64  `tfsdk:"disk_gi"`
-	Username          types.String `tfsdk:"username"`
-	PasswordWO        types.String `tfsdk:"password_wo"`
-	PasswordWOVersion types.Int64  `tfsdk:"password_wo_version"`
-	Stopped           types.Bool   `tfsdk:"stopped"`
-	AllowCIDRs        types.List   `tfsdk:"allow_cidrs"`
-	Port              types.List   `tfsdk:"port"`
-	PlacementStrategy types.String `tfsdk:"placement_strategy"`
-	PlacementHost     types.String `tfsdk:"placement_host"`
-	PlacementRegion   types.String `tfsdk:"placement_region"`
-	AIDaemon          types.Object `tfsdk:"ai_daemon"`
-	StateRepo         types.String `tfsdk:"state_repo"`
-	StateRepoURL      types.String `tfsdk:"state_repo_url"`
-	Ready             types.Bool   `tfsdk:"ready"`
-	SSH               types.String `tfsdk:"ssh"`
-	URL               types.String `tfsdk:"url"`
-	Endpoints         types.List   `tfsdk:"endpoints"`
+	Timeouts          timeouts.Value `tfsdk:"timeouts"`
+	Name              types.String   `tfsdk:"name"`
+	Desktop           types.Bool     `tfsdk:"desktop"`
+	CPUs              types.Int64    `tfsdk:"cpus"`
+	MemoryGi          types.Int64    `tfsdk:"memory_gi"`
+	DiskGi            types.Int64    `tfsdk:"disk_gi"`
+	Username          types.String   `tfsdk:"username"`
+	PasswordWO        types.String   `tfsdk:"password_wo"`
+	PasswordWOVersion types.Int64    `tfsdk:"password_wo_version"`
+	Stopped           types.Bool     `tfsdk:"stopped"`
+	AllowCIDRs        types.List     `tfsdk:"allow_cidrs"`
+	Port              types.List     `tfsdk:"port"`
+	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
+	PlacementHost     types.String   `tfsdk:"placement_host"`
+	PlacementRegion   types.String   `tfsdk:"placement_region"`
+	Ready             types.Bool     `tfsdk:"ready"`
+	SSH               types.String   `tfsdk:"ssh"`
+	URL               types.String   `tfsdk:"url"`
+	Endpoints         types.List     `tfsdk:"endpoints"`
 }
 
 func (m vmResourceModel) workloadType() string {
@@ -276,30 +243,11 @@ func vmSpec(ctx context.Context, m vmResourceModel, password string) map[string]
 		}
 		spec["placement"] = pl
 	}
-	if !m.AIDaemon.IsNull() {
-		var d aiDaemonModel
-		m.AIDaemon.As(ctx, &d, basetypes.ObjectAsOptions{})
-		daemon := map[string]any{
-			"enabled":  true,
-			"provider": d.Provider.ValueString(),
-		}
-		if v := d.Model.ValueString(); v != "" {
-			daemon["model"] = v
-		}
-		if d.Sudo.ValueBool() {
-			daemon["sudo"] = true
-		}
-		if v := d.Instructions.ValueString(); v != "" {
-			daemon["instructions"] = v
-		}
-		spec["aiDaemon"] = daemon
-	}
 	return spec
 }
 
 func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
-	refreshMachineState(ctx, c, m)
 	st, err := statusOf(ctx, c, m.Name.ValueString())
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
@@ -327,24 +275,6 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 	list, d := types.ListValueFrom(ctx, epType, eps)
 	diags.Append(d...)
 	m.Endpoints = list
-}
-
-// refreshMachineState fills the machine-state attributes. Only a VM with an
-// agent has a blueprint repo, so for anything else these stay null rather than
-// empty — null says "not applicable", "" would say "none yet".
-func refreshMachineState(ctx context.Context, c *client.Client, m *vmResourceModel) {
-	m.StateRepo, m.StateRepoURL = types.StringNull(), types.StringNull()
-	if m.AIDaemon.IsNull() || m.AIDaemon.IsUnknown() {
-		return
-	}
-	ms, err := c.MachineState(ctx, m.Name.ValueString())
-	if err != nil || ms == nil || !ms.Exists {
-		return
-	}
-	m.StateRepo = types.StringValue(ms.Repo)
-	if ms.URL != "" {
-		m.StateRepoURL = types.StringValue(ms.URL)
-	}
 }
 
 func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

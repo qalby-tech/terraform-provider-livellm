@@ -57,13 +57,11 @@ Manage the core of a workspace as code today:
 
 | Resource | What it creates |
 |---|---|
-| `livellm_vm` | Ubuntu VM (terminal or desktop), ports, placement, optional AI agent |
+| `livellm_vm` | Ubuntu VM (terminal or desktop), ports, placement |
 | `livellm_container_app` | Container app from an image or a repo built on every push |
 | `livellm_storage` | Managed Postgres or Redis, backups, external TLS access |
 | `livellm_secret` | Workspace secret with a write-only value |
-| `livellm_browser` | Headless Chromium, optionally AI-driven |
-| `livellm_agent_master` | The workspace's orchestrator agent |
-| `livellm_ai_provider` | AI provider connection with a write-only key |
+| `livellm_browser` | Headless Chromium with a live view and a CDP endpoint |
 
 Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`.
 
@@ -73,18 +71,6 @@ HTTP error. Create/update timeouts are configurable per resource via the standar
 
 ~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
-
-## Machines come back whole
-
-This provider declares a VM's *shape*. What is *inside* the machine — packages,
-services, config — is kept as code in its machine state repo, surfaced as
-`state_repo` / `state_repo_url`. That repo outlives the machine on purpose, and
-the platform replays it onto a rebuilt one, so `destroy` followed by `apply`
-returns the same machine rather than an empty one with the same name.
-
-```hcl
-output "blueprint" { value = livellm_vm.dev.state_repo_url }
-```
 
 ## Examples
 

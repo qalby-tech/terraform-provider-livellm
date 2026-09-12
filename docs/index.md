@@ -2,15 +2,14 @@
 page_title: "livellm Provider"
 description: |-
   Manage a livellm cloud workspace as code — VMs, managed databases,
-  container apps, browsers, secrets and AI agents, driven by the same
-  public API as the dashboard.
+  container apps, browsers and secrets, driven by the same public API as
+  the dashboard.
 ---
 
 # livellm Provider
 
 The livellm provider manages a [livellm cloud](https://cloud.live-llm.com)
-workspace: reviewable, versioned, repeatable infrastructure — and a natural
-surface for AI agents to write.
+workspace: reviewable, versioned, repeatable infrastructure.
 
 Authentication is a single workspace API key — each key manages the
 workspace it was minted in. Mint keys on your workspace's
@@ -47,31 +46,17 @@ configuration; keys are secrets.
 
 | Resource | What it creates |
 |---|---|
-| [`livellm_vm`](resources/vm.md) | Ubuntu VM (terminal or desktop), ports, placement, optional AI agent |
+| [`livellm_vm`](resources/vm.md) | Ubuntu VM (terminal or desktop), ports, placement |
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a repo built on every push |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
 | [`livellm_secret`](resources/secret.md) | Workspace secret with a write-only value |
-| [`livellm_browser`](resources/browser.md) | Headless Chromium, optionally AI-driven |
-| [`livellm_agent_master`](resources/agent_master.md) | The workspace's orchestrator agent |
-| [`livellm_ai_provider`](resources/ai_provider.md) | AI provider connection with a write-only key |
+| [`livellm_browser`](resources/browser.md) | Headless Chromium with a live view and a CDP endpoint |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md).
 
 Creates and updates wait until the resource is actually serving; plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic. Create/update timeouts are configurable per resource via the standard `timeouts` block.
-
-## Machines are reproducible too
-
-Terraform declares a VM's *shape* — cores, memory, disk, ports. A VM with an
-agent additionally keeps its *insides* as code: the packages, services and
-config that make it that machine live in a
-[machine state](resources/vm.md#reproducible-machines) repo, and the platform
-replays that repo onto the machine whenever it is rebuilt.
-
-So `terraform destroy` followed by `terraform apply` returns the same machine
-rather than an empty one with the same name. The two halves together make a
-whole workspace reproducible from git.
 
 ~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
