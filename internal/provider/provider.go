@@ -94,7 +94,6 @@ func (p *livellmProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 func (p *livellmProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewSecretResource,
 		NewStorageResource,
 		NewContainerAppResource,
 		NewVMResource,

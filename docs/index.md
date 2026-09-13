@@ -2,8 +2,8 @@
 page_title: "livellm Provider"
 description: |-
   Manage a livellm cloud workspace as code — VMs, managed databases,
-  container apps, browsers and secrets, driven by the same public API as
-  the dashboard.
+  container apps and browsers, driven by the same public API as the
+  dashboard.
 ---
 
 # livellm Provider
@@ -47,9 +47,8 @@ configuration; keys are secrets.
 | Resource | What it creates |
 |---|---|
 | [`livellm_vm`](resources/vm.md) | Ubuntu VM (terminal or desktop), ports, placement |
-| [`livellm_container_app`](resources/container_app.md) | Container app from an image or a repo built on every push |
+| [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
-| [`livellm_secret`](resources/secret.md) | Workspace secret with a write-only value |
 | [`livellm_browser`](resources/browser.md) | Headless Chromium with a live view and a CDP endpoint |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
@@ -58,5 +57,5 @@ Data sources: [`livellm_workspace`](data-sources/workspace.md),
 Creates and updates wait until the resource is actually serving; plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
-~> Write-only arguments (`password_wo`, `value_wo`) require Terraform 1.11+ or
+~> Write-only arguments (`password_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.

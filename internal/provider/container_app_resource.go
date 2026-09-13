@@ -20,8 +20,15 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// livellm_container_app — a container app from a prebuilt image or a
-// build-from-source repo in the workspace's Git org.
+// Platform-side defaults for the optional build fields. The API may echo them
+// back on read; a config that left the field unset must not see a diff.
+const (
+	defaultDockerfile = "Dockerfile"
+	defaultContext    = "."
+)
+
+// livellm_container_app — a container app from a prebuilt image or from a Git
+// repo with a Dockerfile that the platform builds into an image.
 type containerAppResource struct {
 	data *providerData
 }
@@ -36,8 +43,9 @@ func (r *containerAppResource) Metadata(_ context.Context, req resource.Metadata
 
 func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A container app: run a prebuilt image, or point at a repo in the workspace's Git org " +
-			"and the platform builds and rolls it on every push. Exposed ports get public HTTPS hostnames.",
+		Description: "A container app: run a prebuilt image, or give the platform a Git repo with a Dockerfile " +
+			"and it builds the image for you (rebuild any time from the dashboard or the API). " +
+			"Exposed ports get public HTTPS hostnames.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:    true,
@@ -48,11 +56,7 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 			},
 			"image": schema.StringAttribute{
 				Optional:    true,
-				Description: "Prebuilt image reference. Set image or source_repo, not both.",
-			},
-			"source_repo": schema.StringAttribute{
-				Optional:    true,
-				Description: "Build-from-source: a repo URL in the workspace Git org; every push builds and deploys.",
+				Description: "Prebuilt image reference. Set image or a source block, not both.",
 			},
 			"command": schema.ListAttribute{
 				Optional:    true,
@@ -70,7 +74,14 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 			"env": schema.MapAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Plain environment variables. For secrets use secret_env instead.",
+				Description: "Plain environment variables. For secret values use secret_env instead.",
+			},
+			"secret_env": schema.MapAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				ElementType: types.StringType,
+				Description: "Environment variables with secret values. The platform stores the values " +
+					"write-only: they never appear in the app's spec or in API responses, only their names do.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the app is running."},
 			"url": schema.StringAttribute{
@@ -92,12 +103,38 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
-			"secret_env": schema.ListNestedBlock{
-				Description: "Environment variables backed by workspace secrets — the value comes from the secret store at run time, never through Terraform.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"name": schema.StringAttribute{Required: true, Description: "The env var name inside the container."},
-						"path": schema.StringAttribute{Required: true, Description: "The workspace secret path providing the value."},
+			"source": schema.SingleNestedBlock{
+				Description: "Build the image from a Git repo instead of pulling a prebuilt one. " +
+					"The platform clones the repo, builds the Dockerfile and runs the result; " +
+					"trigger a rebuild from the dashboard or the API whenever the repo changes.",
+				Attributes: map[string]schema.Attribute{
+					"token": schema.StringAttribute{
+						Optional:    true,
+						Sensitive:   true,
+						Description: "Access token for a private repo. Write-only on the platform — it is never read back.",
+					},
+				},
+				Blocks: map[string]schema.Block{
+					"git": schema.SingleNestedBlock{
+						Description: "The repo to build.",
+						Attributes: map[string]schema.Attribute{
+							"url": schema.StringAttribute{
+								Required:    true,
+								Description: "HTTPS clone URL.",
+							},
+							"ref": schema.StringAttribute{
+								Optional:    true,
+								Description: "Branch, tag (\"refs/tags/v1\") or commit to build. Unset = the repo's default branch.",
+							},
+							"dockerfile": schema.StringAttribute{
+								Optional:    true,
+								Description: "Dockerfile path relative to the build context. Defaults to \"Dockerfile\".",
+							},
+							"context": schema.StringAttribute{
+								Optional:    true,
+								Description: "Build context: a subdirectory of the repo. Defaults to the repo root.",
+							},
+						},
 					},
 				},
 			},
@@ -131,34 +168,87 @@ type appPortModel struct {
 	Port types.Int64  `tfsdk:"port"`
 }
 
-type secretEnvModel struct {
-	Name types.String `tfsdk:"name"`
-	Path types.String `tfsdk:"path"`
+type gitSourceModel struct {
+	URL        types.String `tfsdk:"url"`
+	Ref        types.String `tfsdk:"ref"`
+	Dockerfile types.String `tfsdk:"dockerfile"`
+	Context    types.String `tfsdk:"context"`
+}
+
+type sourceModel struct {
+	Git   *gitSourceModel `tfsdk:"git"`
+	Token types.String    `tfsdk:"token"`
 }
 
 type containerAppModel struct {
-	Timeouts timeouts.Value `tfsdk:"timeouts"`
-	Name      types.String `tfsdk:"name"`
-	Image     types.String `tfsdk:"image"`
-	SourceRepo types.String `tfsdk:"source_repo"`
-	Command   types.List   `tfsdk:"command"`
-	CPU       types.String `tfsdk:"cpu"`
-	Memory    types.String `tfsdk:"memory"`
-	Env       types.Map    `tfsdk:"env"`
-	SecretEnv types.List   `tfsdk:"secret_env"`
-	Port      types.List   `tfsdk:"port"`
-	Ready     types.Bool   `tfsdk:"ready"`
-	URL       types.String `tfsdk:"url"`
-	Endpoints types.List   `tfsdk:"endpoints"`
+	Timeouts  timeouts.Value `tfsdk:"timeouts"`
+	Name      types.String   `tfsdk:"name"`
+	Image     types.String   `tfsdk:"image"`
+	Source    *sourceModel   `tfsdk:"source"`
+	Command   types.List     `tfsdk:"command"`
+	CPU       types.String   `tfsdk:"cpu"`
+	Memory    types.String   `tfsdk:"memory"`
+	Env       types.Map      `tfsdk:"env"`
+	SecretEnv types.Map      `tfsdk:"secret_env"`
+	Port      types.List     `tfsdk:"port"`
+	Ready     types.Bool     `tfsdk:"ready"`
+	URL       types.String   `tfsdk:"url"`
+	Endpoints types.List     `tfsdk:"endpoints"`
 }
 
-func containerAppSpec(ctx context.Context, m containerAppModel) map[string]any {
+func (m containerAppModel) hasSource() bool {
+	return m.Source != nil && m.Source.Git != nil && m.Source.Git.URL.ValueString() != ""
+}
+
+func (m containerAppModel) sourceToken() string {
+	if m.Source == nil {
+		return ""
+	}
+	return m.Source.Token.ValueString()
+}
+
+// sortedEnv turns a Terraform map into the API's ordered {name, value} list —
+// deterministic order means stable diffs on the workspace spec.
+func sortedEnv(ctx context.Context, m types.Map) []map[string]any {
+	var env map[string]string
+	m.ElementsAs(ctx, &env, false)
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	vars := make([]map[string]any, 0, len(env))
+	for _, k := range keys {
+		vars = append(vars, map[string]any{"name": k, "value": env[k]})
+	}
+	return vars
+}
+
+// containerAppSpec renders the API's pod block. sendToken controls whether the
+// repo token rides along: a token the platform already holds is left alone so
+// an unrelated update (cpu, env…) doesn't re-send it and trigger a rebuild.
+func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) map[string]any {
 	spec := map[string]any{}
 	if v := m.Image.ValueString(); v != "" {
 		spec["image"] = v
 	}
-	if v := m.SourceRepo.ValueString(); v != "" {
-		spec["source"] = map[string]any{"repo": v}
+	if m.hasSource() {
+		g := m.Source.Git
+		git := map[string]any{"url": g.URL.ValueString()}
+		if v := g.Ref.ValueString(); v != "" {
+			git["ref"] = v
+		}
+		if v := g.Dockerfile.ValueString(); v != "" {
+			git["dockerfile"] = v
+		}
+		if v := g.Context.ValueString(); v != "" {
+			git["context"] = v
+		}
+		src := map[string]any{"git": git}
+		if tok := m.sourceToken(); sendToken && tok != "" {
+			src["gitAuth"] = map[string]any{"token": tok}
+		}
+		spec["source"] = src
 	}
 	if !m.Command.IsNull() {
 		var cmd []string
@@ -172,27 +262,12 @@ func containerAppSpec(ctx context.Context, m containerAppModel) map[string]any {
 		spec["memory"] = v
 	}
 	if !m.Env.IsNull() {
-		var env map[string]string
-		m.Env.ElementsAs(ctx, &env, false)
-		keys := make([]string, 0, len(env))
-		for k := range env {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys) // deterministic spec — stable diffs on the CR
-		vars := make([]map[string]any, 0, len(env))
-		for _, k := range keys {
-			vars = append(vars, map[string]any{"name": k, "value": env[k]})
-		}
-		spec["env"] = vars
+		spec["env"] = sortedEnv(ctx, m.Env)
 	}
 	if !m.SecretEnv.IsNull() {
-		var ses []secretEnvModel
-		m.SecretEnv.ElementsAs(ctx, &ses, false)
-		out := make([]map[string]any, 0, len(ses))
-		for _, se := range ses {
-			out = append(out, map[string]any{"name": se.Name.ValueString(), "path": se.Path.ValueString()})
-		}
-		spec["secretEnv"] = out
+		// Every value from config, every time — the platform stores what it
+		// gets and never returns it, so config is the only source of truth.
+		spec["secretEnv"] = sortedEnv(ctx, m.SecretEnv)
 	}
 	if !m.Port.IsNull() {
 		var ports []appPortModel
@@ -204,6 +279,59 @@ func containerAppSpec(ctx context.Context, m containerAppModel) map[string]any {
 		spec["ports"] = out
 	}
 	return spec
+}
+
+// readDefaulted reconciles an optional build field against what the API
+// reports. A field the config never set stays unset when the API merely
+// echoes the platform default; a real change made elsewhere shows as drift.
+func readDefaulted(prev types.String, api, def string) types.String {
+	switch {
+	case api == "" && (prev.IsNull() || prev.ValueString() == def):
+		return prev
+	case api == "":
+		return types.StringNull()
+	case api == def && prev.IsNull():
+		return prev
+	default:
+		return types.StringValue(api)
+	}
+}
+
+// readEnvMap reconciles a map attribute against the API's {name[, value]}
+// list. Names absent from state get `fallback` (secret values are never
+// returned, so a var added outside Terraform shows up as drift with an empty
+// value and the next apply re-asserts the config).
+func readEnvMap(prev types.Map, raw []any, valueFromAPI bool) types.Map {
+	if len(raw) == 0 {
+		if prev.IsNull() || len(prev.Elements()) == 0 {
+			return prev // null vs {} — keep whatever the config said
+		}
+		return types.MapNull(types.StringType)
+	}
+	prevVals := prev.Elements()
+	kv := map[string]attr.Value{}
+	for _, e := range raw {
+		em, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := em["name"].(string)
+		if name == "" {
+			continue
+		}
+		switch {
+		case valueFromAPI:
+			value, _ := em["value"].(string)
+			kv[name] = types.StringValue(value)
+		default:
+			if pv, ok := prevVals[name]; ok {
+				kv[name] = pv
+			} else {
+				kv[name] = types.StringValue("")
+			}
+		}
+	}
+	return types.MapValueMust(types.StringType, kv)
 }
 
 func refreshAppStatus(ctx context.Context, c *client.Client, name string, m *containerAppModel, diags *diag.Diagnostics) {
@@ -241,20 +369,24 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if plan.Image.ValueString() == "" && plan.SourceRepo.ValueString() == "" {
-		resp.Diagnostics.AddError("Missing image", "Set image (prebuilt) or source_repo (build from source).")
+	switch {
+	case plan.Image.ValueString() == "" && !plan.hasSource():
+		resp.Diagnostics.AddError("Missing image", "Set image (prebuilt) or a source block with git.url (built from the repo).")
+		return
+	case plan.Image.ValueString() != "" && plan.hasSource():
+		resp.Diagnostics.AddError("Conflicting image and source", "Set image (prebuilt) or a source block, not both.")
 		return
 	}
-	body := containerAppSpec(ctx, plan)
+	body := containerAppSpec(ctx, plan, true)
 	body["id"] = plan.Name.ValueString()
 	if err := r.data.Client.CreateWorkload(ctx, "pod", body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create container app", err)
 		return
 	}
-	// Build-from-source apps aren't ready until their first build lands —
+	// Apps built from a repo aren't ready until their first build lands —
 	// give them longer than plain image pulls (both overridable via timeouts).
 	def := 10 * time.Minute
-	if plan.SourceRepo.ValueString() != "" {
+	if plan.hasSource() {
 		def = 20 * time.Minute
 	}
 	createTimeout, td := plan.Timeouts.Create(ctx, def)
@@ -287,11 +419,36 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	sp := w.Pod
 	if v, ok := sp["image"].(string); ok && v != "" {
 		state.Image = types.StringValue(v)
+	} else {
+		state.Image = types.StringNull()
 	}
+	var git map[string]any
 	if src, ok := sp["source"].(map[string]any); ok {
-		if v, ok := src["repo"].(string); ok && v != "" {
-			state.SourceRepo = types.StringValue(v)
+		git, _ = src["git"].(map[string]any)
+	}
+	if url, _ := git["url"].(string); url != "" {
+		prev := gitSourceModel{}
+		token := types.StringNull()
+		if state.Source != nil {
+			token = state.Source.Token // write-only on the platform: state keeps the config's value
+			if state.Source.Git != nil {
+				prev = *state.Source.Git
+			}
 		}
+		ref, _ := git["ref"].(string)
+		dockerfile, _ := git["dockerfile"].(string)
+		buildCtx, _ := git["context"].(string)
+		state.Source = &sourceModel{
+			Token: token,
+			Git: &gitSourceModel{
+				URL:        types.StringValue(url),
+				Ref:        readDefaulted(prev.Ref, ref, ""),
+				Dockerfile: readDefaulted(prev.Dockerfile, dockerfile, defaultDockerfile),
+				Context:    readDefaulted(prev.Context, buildCtx, defaultContext),
+			},
+		}
+	} else {
+		state.Source = nil
 	}
 	if v, ok := sp["cpu"].(string); ok && v != "" {
 		state.CPU = types.StringValue(v)
@@ -299,39 +456,38 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	if v, ok := sp["memory"].(string); ok && v != "" {
 		state.Memory = types.StringValue(v)
 	}
-	if raw, ok := sp["env"].([]any); ok {
-		kv := map[string]attr.Value{}
-		for _, e := range raw {
-			if em, ok := e.(map[string]any); ok {
-				name, _ := em["name"].(string)
-				value, _ := em["value"].(string)
-				if name != "" {
-					kv[name] = types.StringValue(value)
-				}
-			}
-		}
-		state.Env = types.MapValueMust(types.StringType, kv)
-	}
+	env, _ := sp["env"].([]any)
+	state.Env = readEnvMap(state.Env, env, true)
+	secretEnv, _ := sp["secretEnv"].([]any)
+	state.SecretEnv = readEnvMap(state.SecretEnv, secretEnv, false)
 	refreshAppStatus(ctx, r.data.Client, state.Name.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
 func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan containerAppModel
+	var plan, state containerAppModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// Re-send the repo token only when it changed (or the app just gained a
+	// source): the platform keeps the stored one otherwise.
+	sendToken := plan.sourceToken() != state.sourceToken() || !state.hasSource()
 	w := client.Workload{
 		ID:   plan.Name.ValueString(),
 		Type: "pod",
-		Pod:  containerAppSpec(ctx, plan),
+		Pod:  containerAppSpec(ctx, plan, sendToken),
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update container app", err)
 		return
 	}
-	createTimeout, td := plan.Timeouts.Create(ctx, 10*time.Minute)
+	def := 10 * time.Minute
+	if plan.hasSource() {
+		def = 20 * time.Minute // a source change rebuilds before the roll
+	}
+	createTimeout, td := plan.Timeouts.Create(ctx, def)
 	resp.Diagnostics.Append(td...)
 	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()

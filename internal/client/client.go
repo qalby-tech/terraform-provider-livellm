@@ -168,34 +168,3 @@ func (c *Client) UpdateWorkload(ctx context.Context, id string, w Workload) erro
 func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/workloads/"+id, nil, nil)
 }
-
-// --- Secrets ----------------------------------------------------------------
-
-// SecretMeta is one stored secret's metadata — values are write-only and
-// never returned by the API.
-type SecretMeta struct {
-	Path           string `json:"path"`
-	CurrentVersion int    `json:"currentVersion"`
-	UpdatedAt      string `json:"updatedAt"`
-}
-
-func (c *Client) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
-	var out struct {
-		Secrets []SecretMeta `json:"secrets"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/secrets", nil, &out); err != nil {
-		return nil, err
-	}
-	return out.Secrets, nil
-}
-
-// SetSecret writes a value at a path; every write is a new version.
-func (c *Client) SetSecret(ctx context.Context, path, value, note string) error {
-	return c.do(ctx, http.MethodPut, "/v1/me/tenant/secrets",
-		map[string]string{"path": path, "value": value, "note": note}, nil)
-}
-
-func (c *Client) DeleteSecret(ctx context.Context, path string) error {
-	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/secrets",
-		map[string]string{"path": path}, nil)
-}

@@ -1,15 +1,16 @@
 ---
 page_title: "livellm_container_app Resource - livellm"
 description: |-
-  A container app from a prebuilt image or a repo the platform builds for you.
+  A container app from a prebuilt image or a Git repo the platform builds for you.
 ---
 
 # livellm_container_app (Resource)
 
-Runs a container app. Give it a prebuilt `image`, or point `source_repo` at a
-repo in your workspace's Git org and the platform builds and rolls it on every
-push. Terraform waits until the app is serving, then reports the public URL of
-every exposed port.
+Runs a container app. Give it a prebuilt `image`, or a `source` block pointing
+at a Git repo with a Dockerfile: the platform clones the repo, builds the image
+and runs it. Rebuild whenever you like from the dashboard or the API (the
+platform never polls your repo). Terraform waits until the app is serving, then
+reports the public URL of every exposed port.
 
 ## Example Usage
 
@@ -35,20 +36,29 @@ output "web_url" {
 }
 ```
 
-Wired to a database and a secret — no secret value passes through Terraform:
+Built from a Git repo, wired to a managed database, with a secret value that
+the platform stores write-only:
 
 ```terraform
 resource "livellm_container_app" "api" {
-  name        = "api"
-  source_repo = "https://git.live-llm.com/acme/api" # built on every push
+  name = "api"
+
+  source {
+    git {
+      url        = "https://github.com/acme/api.git"
+      ref        = "main"          # branch, tag or commit; unset = default branch
+      dockerfile = "Dockerfile"    # relative to the build context
+      context    = "services/api"  # subdirectory of the repo; unset = repo root
+    }
+    token = var.github_token       # only for private repos
+  }
 
   env = {
     DB_HOST = one([for e in livellm_storage.db.endpoints : e.addr if e.name == "postgres"])
   }
 
-  secret_env {
-    name = "DB_PASSWORD"
-    path = livellm_secret.db_password.path
+  secret_env = {
+    DB_PASSWORD = var.db_password
   }
 
   port {
@@ -66,15 +76,22 @@ resource "livellm_container_app" "api" {
 
 ### Optional
 
-- `image` (String) Prebuilt image reference. Set `image` or `source_repo`, not both.
-- `source_repo` (String) Build-from-source: a repo URL in the workspace Git org.
+- `image` (String) Prebuilt image reference. Set `image` or a `source` block, not both.
+- `source` (Block) Build the image from a Git repo:
+  - `git` (Block, Required) The repo to build:
+    - `url` (String, Required) HTTPS clone URL.
+    - `ref` (String) Branch, tag (`refs/tags/v1`) or commit to build. Unset = the repo's default branch.
+    - `dockerfile` (String) Dockerfile path relative to the build context. Defaults to `Dockerfile`.
+    - `context` (String) Build context, a subdirectory of the repo. Defaults to the repo root.
+  - `token` (String, Sensitive) Access token for a private repo. Stored write-only by the platform; re-sent only when it changes.
 - `command` (List of String) Entrypoint override.
 - `cpu` (String) CPU request, e.g. `500m`.
 - `memory` (String) Memory request, e.g. `512Mi`.
-- `env` (Map of String) Plain environment variables. Use `secret_env` for secrets.
-- `secret_env` (Block List) Env vars backed by workspace secrets:
-  - `name` (String, Required) Env var name inside the container.
-  - `path` (String, Required) Workspace secret path providing the value.
+- `env` (Map of String) Plain environment variables.
+- `secret_env` (Map of String, Sensitive) Environment variables with secret
+  values. The platform stores the values write-only — API responses carry the
+  names only, so a value changed outside Terraform is re-asserted from your
+  configuration on the next apply.
 - `port` (Block List) Exposed ports:
   - `name` (String, Required) Port name — becomes part of the hostname.
   - `port` (Number, Required) Container port.
@@ -90,3 +107,6 @@ resource "livellm_container_app" "api" {
 ```shell
 terraform import livellm_container_app.web web
 ```
+
+Secret values and the repo token cannot be read back; set them in
+configuration after importing.
