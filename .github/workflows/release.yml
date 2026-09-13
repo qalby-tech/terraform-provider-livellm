@@ -1,6 +1,5 @@
 # Build + sign + publish a provider release on every v* tag. The Terraform
-# Registry then picks the release up automatically (after the one-time
-# registration steps in README "Publishing").
+# Registry picks the release up automatically once the provider is registered.
 #
 # Secrets required:
 #   GPG_PRIVATE_KEY — ASCII-armored private signing key

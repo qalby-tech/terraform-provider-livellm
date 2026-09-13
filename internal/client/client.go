@@ -80,10 +80,9 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 
 // Workspace is the tenant an llc_ key is scoped to (GET /v1/me/tenant).
 type Workspace struct {
-	Name  string         `json:"name"`
-	Plan  string         `json:"plan"`
-	Owner string         `json:"owner"`
-	Spec  map[string]any `json:"spec"`
+	Name  string `json:"name"`
+	Plan  string `json:"plan"`
+	Owner string `json:"owner"`
 }
 
 // MyWorkspace resolves the key's workspace — also the provider's auth check.
@@ -184,16 +183,10 @@ func (c *Client) ListSecrets(ctx context.Context) ([]SecretMeta, error) {
 	var out struct {
 		Secrets []SecretMeta `json:"secrets"`
 	}
-	// The list endpoint returns a bare array in some builds and a wrapped
-	// object in others; try the wrapper first, fall back to the array.
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/secrets", nil, &out); err == nil && out.Secrets != nil {
-		return out.Secrets, nil
-	}
-	var arr []SecretMeta
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/secrets", nil, &arr); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/secrets", nil, &out); err != nil {
 		return nil, err
 	}
-	return arr, nil
+	return out.Secrets, nil
 }
 
 // SetSecret writes a value at a path; every write is a new version.

@@ -22,8 +22,7 @@ type livellmProvider struct {
 
 // Data handed to every resource/data source after Configure.
 type providerData struct {
-	Client    *client.Client
-	Workspace *client.Workspace
+	Client *client.Client
 }
 
 func New(version string) func() provider.Provider {
@@ -45,7 +44,7 @@ func (p *livellmProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			"api_key": schema.StringAttribute{
 				Optional:    true,
 				Sensitive:   true,
-				Description: "Workspace API key (llc_…). Falls back to the LIVELLM_API_KEY environment variable. Mint keys on your workspace's Integrations page.",
+				Description: "Workspace API key (llc_…). Falls back to the LIVELLM_API_KEY environment variable. Mint keys on your workspace's API keys page.",
 			},
 			"endpoint": schema.StringAttribute{
 				Optional:    true,
@@ -75,7 +74,7 @@ func (p *livellmProvider) Configure(ctx context.Context, req provider.ConfigureR
 		resp.Diagnostics.AddError(
 			"Missing API key",
 			"Set the provider's api_key attribute or the LIVELLM_API_KEY environment variable. "+
-				"Mint a key on your workspace's Integrations page at cloud.live-llm.com.",
+				"Mint a key on your workspace's API keys page at cloud.live-llm.com/api-keys.",
 		)
 		return
 	}
@@ -83,13 +82,12 @@ func (p *livellmProvider) Configure(ctx context.Context, req provider.ConfigureR
 	c := client.New(cfg.Endpoint.ValueString(), key)
 	// Resolve the key's workspace once — this is also the auth check, so a bad
 	// key fails at plan time with a clear message instead of on first apply.
-	ws, err := c.MyWorkspace(ctx)
-	if err != nil {
+	if _, err := c.MyWorkspace(ctx); err != nil {
 		resp.Diagnostics.AddError("Cannot resolve workspace", "GET /v1/me/tenant failed: "+err.Error())
 		return
 	}
 
-	data := &providerData{Client: c, Workspace: ws}
+	data := &providerData{Client: c}
 	resp.DataSourceData = data
 	resp.ResourceData = data
 }
