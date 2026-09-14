@@ -12,6 +12,9 @@
     dashboard or the API.
   - `secret_env` is now a sensitive map of `NAME = value` (was a block list of
     `name` + workspace secret `path`).
+  - **Added** an `image_auth { username, password }` block to pull private
+    images. The password is sensitive and write-only on the platform; it is
+    not allowed together with `source`.
 
 ## 0.4.0 and earlier
 

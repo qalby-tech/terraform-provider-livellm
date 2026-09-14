@@ -95,3 +95,49 @@ func TestContainerAppSpec(t *testing.T) {
 		t.Error("no image for a source app")
 	}
 }
+
+func TestContainerAppImageAuth(t *testing.T) {
+	ctx := context.Background()
+	m := containerAppModel{
+		Name:  types.StringValue("grafana"),
+		Image: types.StringValue("ghcr.io/acme/grafana:11"),
+		ImageAuth: &imageAuthModel{
+			Username: types.StringValue("acme-bot"),
+			Password: types.StringValue("ghp_x"),
+		},
+	}
+	spec := containerAppSpec(ctx, m, true)
+	auth, ok := spec["imageAuth"].(map[string]any)
+	if !ok || auth["username"] != "acme-bot" || auth["password"] != "ghp_x" {
+		t.Fatalf("imageAuth: %v", spec["imageAuth"])
+	}
+	if s, _ := appShapeError(m); s != "" {
+		t.Errorf("image + image_auth must be valid, got %q", s)
+	}
+
+	withSource := m
+	withSource.Image = types.StringNull()
+	withSource.Source = &sourceModel{Git: &gitSourceModel{URL: types.StringValue("https://github.com/acme/api.git")}}
+	if s, _ := appShapeError(withSource); s != "Conflicting image_auth and source" {
+		t.Errorf("source + image_auth must be rejected, got %q", s)
+	}
+	if _, ok := containerAppSpec(ctx, withSource, true)["imageAuth"]; ok {
+		t.Error("imageAuth must never be sent for a source app")
+	}
+
+	if _, ok := containerAppSpec(ctx, containerAppModel{Image: types.StringValue("nginx")}, true)["imageAuth"]; ok {
+		t.Error("no image_auth block, no imageAuth")
+	}
+
+	prev := &imageAuthModel{Username: types.StringValue("old"), Password: types.StringValue("kept")}
+	got := readImageAuth(prev, map[string]any{"username": "acme-bot"})
+	if got == nil || got.Username.ValueString() != "acme-bot" || got.Password.ValueString() != "kept" {
+		t.Errorf("read keeps the password from state and takes the username from the api: %+v", got)
+	}
+	if readImageAuth(prev, nil) != nil {
+		t.Error("api without imageAuth reads as no block (drift when configured)")
+	}
+	if got := readImageAuth(nil, map[string]any{"username": "u"}); got == nil || !got.Password.IsNull() {
+		t.Errorf("import without state leaves the password null: %+v", got)
+	}
+}

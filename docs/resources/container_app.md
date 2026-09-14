@@ -68,6 +68,25 @@ resource "livellm_container_app" "api" {
 }
 ```
 
+A private image, pulled with registry credentials:
+
+```terraform
+resource "livellm_container_app" "grafana" {
+  name  = "grafana"
+  image = "ghcr.io/acme/grafana:11"
+
+  image_auth {
+    username = "acme-bot"
+    password = var.ghcr_token
+  }
+
+  port {
+    name = "http"
+    port = 3000
+  }
+}
+```
+
 ## Schema
 
 ### Required
@@ -84,6 +103,9 @@ resource "livellm_container_app" "api" {
     - `dockerfile` (String) Dockerfile path relative to the build context. Defaults to `Dockerfile`.
     - `context` (String) Build context, a subdirectory of the repo. Defaults to the repo root.
   - `token` (String, Sensitive) Access token for a private repo. Stored write-only by the platform; re-sent only when it changes.
+- `image_auth` (Block) Credentials for pulling a private `image`. Not allowed with `source`:
+  - `username` (String, Required) Registry username.
+  - `password` (String, Required, Sensitive) Registry password or access token. Stored write-only by the platform; sent from configuration on every apply.
 - `command` (List of String) Entrypoint override.
 - `cpu` (String) CPU request, e.g. `500m`.
 - `memory` (String) Memory request, e.g. `512Mi`.
@@ -108,5 +130,5 @@ resource "livellm_container_app" "api" {
 terraform import livellm_container_app.web web
 ```
 
-Secret values and the repo token cannot be read back; set them in
-configuration after importing.
+Secret values, the repo token and the image password cannot be read back;
+set them in configuration after importing.

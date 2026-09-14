@@ -138,6 +138,20 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 					},
 				},
 			},
+			"image_auth": schema.SingleNestedBlock{
+				Description: "Credentials for pulling a private image. Only with image, not with source.",
+				Attributes: map[string]schema.Attribute{
+					"username": schema.StringAttribute{
+						Required:    true,
+						Description: "Registry username.",
+					},
+					"password": schema.StringAttribute{
+						Required:    true,
+						Sensitive:   true,
+						Description: "Registry password or access token. Write-only on the platform — it is never read back.",
+					},
+				},
+			},
 			"port": schema.ListNestedBlock{
 				Description: "Exposed ports — each HTTP port is served on its own public HTTPS hostname.",
 				NestedObject: schema.NestedBlockObject{
@@ -180,24 +194,48 @@ type sourceModel struct {
 	Token types.String    `tfsdk:"token"`
 }
 
+type imageAuthModel struct {
+	Username types.String `tfsdk:"username"`
+	Password types.String `tfsdk:"password"`
+}
+
 type containerAppModel struct {
-	Timeouts  timeouts.Value `tfsdk:"timeouts"`
-	Name      types.String   `tfsdk:"name"`
-	Image     types.String   `tfsdk:"image"`
-	Source    *sourceModel   `tfsdk:"source"`
-	Command   types.List     `tfsdk:"command"`
-	CPU       types.String   `tfsdk:"cpu"`
-	Memory    types.String   `tfsdk:"memory"`
-	Env       types.Map      `tfsdk:"env"`
-	SecretEnv types.Map      `tfsdk:"secret_env"`
-	Port      types.List     `tfsdk:"port"`
-	Ready     types.Bool     `tfsdk:"ready"`
-	URL       types.String   `tfsdk:"url"`
-	Endpoints types.List     `tfsdk:"endpoints"`
+	Timeouts  timeouts.Value  `tfsdk:"timeouts"`
+	Name      types.String    `tfsdk:"name"`
+	Image     types.String    `tfsdk:"image"`
+	Source    *sourceModel    `tfsdk:"source"`
+	ImageAuth *imageAuthModel `tfsdk:"image_auth"`
+	Command   types.List      `tfsdk:"command"`
+	CPU       types.String    `tfsdk:"cpu"`
+	Memory    types.String    `tfsdk:"memory"`
+	Env       types.Map       `tfsdk:"env"`
+	SecretEnv types.Map       `tfsdk:"secret_env"`
+	Port      types.List      `tfsdk:"port"`
+	Ready     types.Bool      `tfsdk:"ready"`
+	URL       types.String    `tfsdk:"url"`
+	Endpoints types.List      `tfsdk:"endpoints"`
 }
 
 func (m containerAppModel) hasSource() bool {
 	return m.Source != nil && m.Source.Git != nil && m.Source.Git.URL.ValueString() != ""
+}
+
+func (m containerAppModel) hasImageAuth() bool {
+	return m.ImageAuth != nil && m.ImageAuth.Username.ValueString() != ""
+}
+
+// appShapeError reports an invalid combination of image, source and
+// image_auth as a diagnostic summary + detail; empty strings when valid.
+func appShapeError(m containerAppModel) (string, string) {
+	switch {
+	case m.Image.ValueString() == "" && !m.hasSource():
+		return "Missing image", "Set image (prebuilt) or a source block with git.url (built from the repo)."
+	case m.Image.ValueString() != "" && m.hasSource():
+		return "Conflicting image and source", "Set image (prebuilt) or a source block, not both."
+	case m.hasImageAuth() && m.hasSource():
+		return "Conflicting image_auth and source", "image_auth is only for apps that run an image; remove it or use image instead of source."
+	}
+	return "", ""
 }
 
 func (m containerAppModel) sourceToken() string {
@@ -231,6 +269,15 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 	spec := map[string]any{}
 	if v := m.Image.ValueString(); v != "" {
 		spec["image"] = v
+		if m.hasImageAuth() {
+			// Every apply re-sends the password from config: the platform
+			// stores it write-only and never returns it.
+			auth := map[string]any{"username": m.ImageAuth.Username.ValueString()}
+			if pw := m.ImageAuth.Password.ValueString(); pw != "" {
+				auth["password"] = pw
+			}
+			spec["imageAuth"] = auth
+		}
 	}
 	if m.hasSource() {
 		g := m.Source.Git
@@ -279,6 +326,21 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 		spec["ports"] = out
 	}
 	return spec
+}
+
+// readImageAuth maps the API's imageAuth (username only) back into state,
+// keeping the password from state — the platform never returns it.
+func readImageAuth(prev *imageAuthModel, raw any) *imageAuthModel {
+	auth, _ := raw.(map[string]any)
+	username, _ := auth["username"].(string)
+	if username == "" {
+		return nil
+	}
+	password := types.StringNull()
+	if prev != nil {
+		password = prev.Password
+	}
+	return &imageAuthModel{Username: types.StringValue(username), Password: password}
 }
 
 // readDefaulted reconciles an optional build field against what the API
@@ -369,12 +431,8 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	switch {
-	case plan.Image.ValueString() == "" && !plan.hasSource():
-		resp.Diagnostics.AddError("Missing image", "Set image (prebuilt) or a source block with git.url (built from the repo).")
-		return
-	case plan.Image.ValueString() != "" && plan.hasSource():
-		resp.Diagnostics.AddError("Conflicting image and source", "Set image (prebuilt) or a source block, not both.")
+	if summary, detail := appShapeError(plan); summary != "" {
+		resp.Diagnostics.AddError(summary, detail)
 		return
 	}
 	body := containerAppSpec(ctx, plan, true)
@@ -450,6 +508,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	} else {
 		state.Source = nil
 	}
+	state.ImageAuth = readImageAuth(state.ImageAuth, sp["imageAuth"])
 	if v, ok := sp["cpu"].(string); ok && v != "" {
 		state.CPU = types.StringValue(v)
 	}
@@ -469,6 +528,10 @@ func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRe
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if summary, detail := appShapeError(plan); summary != "" {
+		resp.Diagnostics.AddError(summary, detail)
 		return
 	}
 	// Re-send the repo token only when it changed (or the app just gained a
