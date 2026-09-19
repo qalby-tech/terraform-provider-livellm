@@ -2,6 +2,9 @@
 
 ## Unreleased (breaking)
 
+- **Changed** the provider calls the platform's shorter API paths
+  (`/v1/workspace`, `/v1/status`, `/v1/workloads/…`), which never name the
+  workspace: the API key already belongs to exactly one.
 - **Removed** `livellm_secret`. The workspace secret store is gone; give an
   app its secret values directly with the new `secret_env` map on
   `livellm_container_app`.

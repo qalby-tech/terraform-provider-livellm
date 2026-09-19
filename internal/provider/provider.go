@@ -13,7 +13,7 @@ import (
 )
 
 // livellmProvider is workspace-scoped in v1: the llc_ API key pins exactly one
-// workspace (resolved once via /v1/me/tenant) and every resource lives inside
+// workspace (resolved once via /v1/workspace) and every resource lives inside
 // it. Managing two workspaces = two provider aliases. See the cluster repo's
 // docs/terraform-provider.md for the full design.
 type livellmProvider struct {
@@ -83,7 +83,7 @@ func (p *livellmProvider) Configure(ctx context.Context, req provider.ConfigureR
 	// Resolve the key's workspace once — this is also the auth check, so a bad
 	// key fails at plan time with a clear message instead of on first apply.
 	if _, err := c.MyWorkspace(ctx); err != nil {
-		resp.Diagnostics.AddError("Cannot resolve workspace", "GET /v1/me/tenant failed: "+err.Error())
+		resp.Diagnostics.AddError("Cannot resolve workspace", "GET /v1/workspace failed: "+err.Error())
 		return
 	}
 

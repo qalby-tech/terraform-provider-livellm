@@ -78,7 +78,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	return nil
 }
 
-// Workspace is the tenant an llc_ key is scoped to (GET /v1/me/tenant).
+// Workspace is the one workspace an llc_ key belongs to (GET /v1/workspace).
 type Workspace struct {
 	Name  string `json:"name"`
 	Plan  string `json:"plan"`
@@ -88,7 +88,7 @@ type Workspace struct {
 // MyWorkspace resolves the key's workspace — also the provider's auth check.
 func (c *Client) MyWorkspace(ctx context.Context) (*Workspace, error) {
 	var w Workspace
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant", nil, &w); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/workspace", nil, &w); err != nil {
 		return nil, err
 	}
 	return &w, nil
@@ -103,7 +103,7 @@ type EndpointStatus struct {
 	Addr string `json:"addr,omitempty"`
 }
 
-// WorkloadStatus is the live view of one workload (GET /v1/me/tenant/status).
+// WorkloadStatus is the live view of one workload (GET /v1/status).
 type WorkloadStatus struct {
 	ID        string           `json:"id"`
 	Type      string           `json:"type"`
@@ -121,7 +121,7 @@ type TenantStatus struct {
 // Status returns the live status of every workload in the key's workspace.
 func (c *Client) Status(ctx context.Context) (*TenantStatus, error) {
 	var st TenantStatus
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant/status", nil, &st); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/status", nil, &st); err != nil {
 		return nil, err
 	}
 	return &st, nil
@@ -148,7 +148,7 @@ func (c *Client) Workloads(ctx context.Context) ([]Workload, error) {
 			Workloads []Workload `json:"workloads"`
 		} `json:"spec"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/me/tenant", nil, &w); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/workspace", nil, &w); err != nil {
 		return nil, err
 	}
 	return w.Spec.Workloads, nil
@@ -157,14 +157,14 @@ func (c *Client) Workloads(ctx context.Context) ([]Workload, error) {
 // CreateWorkload posts a new workload of the given type; body is the kind's
 // flat field set (id included).
 func (c *Client) CreateWorkload(ctx context.Context, wtype string, body map[string]any) error {
-	return c.do(ctx, http.MethodPost, "/v1/me/tenant/workloads/"+wtype, body, nil)
+	return c.do(ctx, http.MethodPost, "/v1/workloads/"+wtype, body, nil)
 }
 
 // UpdateWorkload PUTs the full desired workload (the path id wins).
 func (c *Client) UpdateWorkload(ctx context.Context, id string, w Workload) error {
-	return c.do(ctx, http.MethodPut, "/v1/me/tenant/workloads/"+id, w, nil)
+	return c.do(ctx, http.MethodPut, "/v1/workloads/"+id, w, nil)
 }
 
 func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
-	return c.do(ctx, http.MethodDelete, "/v1/me/tenant/workloads/"+id, nil, nil)
+	return c.do(ctx, http.MethodDelete, "/v1/workloads/"+id, nil, nil)
 }
