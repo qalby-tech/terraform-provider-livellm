@@ -1,14 +1,15 @@
 ---
 page_title: "livellm_vm Resource - livellm"
 description: |-
-  An Ubuntu VM — terminal or desktop — with ports and placement.
+  An Ubuntu VM — terminal or desktop — with SSH keys, ports, a stop time and placement.
 ---
 
 # livellm_vm (Resource)
 
 Creates an Ubuntu VM. Terraform waits until the VM is up, then reports its
 SSH address and the public URL of every exposed port. The SSH password is a
-write-only argument.
+write-only argument; give the machine an SSH key of its own with `ssh_keys`,
+and a stop time with `stop_after` when it is made for one job.
 
 ## Example Usage
 
@@ -22,6 +23,7 @@ resource "livellm_vm" "dev" {
   username            = "dev"
   password_wo         = var.vm_password
   password_wo_version = 1
+  ssh_keys            = [file("~/.ssh/id_ed25519.pub")]
 
   # Reachable from anywhere; omit for workspace-internal only.
   allow_cidrs = ["0.0.0.0/0"]
@@ -52,6 +54,33 @@ resource "livellm_vm" "workstation" {
 }
 ```
 
+A machine for one job, stopped by the platform four hours after Terraform
+creates it. Stopping keeps the disk; nothing is deleted:
+
+```terraform
+resource "livellm_vm" "ci" {
+  name      = "ci-box"
+  cpus      = 4
+  memory_gi = 8
+  disk_gi   = 40
+
+  username            = "agent"
+  password_wo         = var.vm_password
+  password_wo_version = 1
+  ssh_keys            = [var.ci_public_key]
+
+  stop_after = "4h"
+}
+
+output "ci_stops_at" { value = livellm_vm.ci.expires_at }
+```
+
+The clock starts when Terraform creates the machine, starts it again, or when
+`stop_after` changes — not on every apply, so editing a port doesn't push the
+stop time back. Once the platform has stopped the machine, Terraform sees
+`stopped` drift to `true`: the next apply starts it for another `stop_after`.
+Set `stopped = true` to leave it off.
+
 Placement is optional — by default LiveLLM picks the host:
 
 ```terraform
@@ -79,7 +108,9 @@ resource "livellm_vm" "eu" {
 - `cpus` (Number) vCPU count.
 - `memory_gi` (Number) Memory in GiB.
 - `disk_gi` (Number) Root disk in GiB.
+- `ssh_keys` (List of String) SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.
+- `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
 - `allow_cidrs` (List of String) Source CIDRs allowed to reach SSH and raw ports. Omit for workspace-internal only; `0.0.0.0/0` for public.
 - `placement_strategy` (String) `region` or `host`. Omit for automatic placement (the default).
 - `placement_region` (String) Region to schedule into.
@@ -93,6 +124,7 @@ resource "livellm_vm" "eu" {
 ### Read-Only
 
 - `ready` (Boolean) Whether the VM is up.
+- `expires_at` (String) When the platform will stop the machine (RFC 3339). Empty when it has no stop time.
 - `ssh` (String) `host:port` to SSH into the VM.
 - `url` (String) The first exposed HTTP port's public HTTPS URL.
 - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`).

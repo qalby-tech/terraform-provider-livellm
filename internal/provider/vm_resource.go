@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -40,8 +42,9 @@ func (r *vmResource) Metadata(_ context.Context, req resource.MetadataRequest, r
 
 func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "An Ubuntu VM — terminal or desktop. SSH login is write-only; exposed ports get " +
-			"public HTTPS hostnames; stopped keeps the disk while halting the machine.",
+		Description: "An Ubuntu VM — terminal or desktop. The SSH password is write-only and the machine can " +
+			"carry SSH keys of its own; exposed ports get public HTTPS hostnames; stopped keeps the disk " +
+			"while halting the machine, and stop_after has the platform do that for you.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:    true,
@@ -88,11 +91,35 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Required:    true,
 				Description: "Rotation trigger for password_wo.",
 			},
+			"ssh_keys": schema.ListAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "SSH public keys for this machine alone, one .pub line each. They are installed for " +
+					"username next to the workspace's own keys, and a change reaches a running machine within a " +
+					"minute or two. Leave it out to keep whatever the machine has; the platform keeps a machine's " +
+					"last key, so replace a key rather than emptying the list.",
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"stopped": schema.BoolAttribute{
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 				Description: "Halt the VM without destroying it — the disk is kept and billing drops to disk-only.",
+			},
+			"stop_after": schema.StringAttribute{
+				Optional: true,
+				Description: "Have the platform stop this machine after a while, so one made for a single job doesn't " +
+					"run forever: a length of time such as \"4h\", \"90m\" or \"2h30m\" (a minute to 30 days). " +
+					"The clock starts when Terraform creates the machine, starts it again, or when this value " +
+					"changes — not on every apply. Stopping keeps the disk. Once the platform has stopped the " +
+					"machine the next apply starts it for another stop_after, unless you set stopped = true.",
+			},
+			"expires_at": schema.StringAttribute{
+				Computed:    true,
+				Description: "When the platform will stop the machine (RFC 3339). Empty when it has no stop time.",
 			},
 			"allow_cidrs": schema.ListAttribute{
 				Optional:    true,
@@ -174,7 +201,10 @@ type vmResourceModel struct {
 	Username          types.String   `tfsdk:"username"`
 	PasswordWO        types.String   `tfsdk:"password_wo"`
 	PasswordWOVersion types.Int64    `tfsdk:"password_wo_version"`
+	SSHKeys           types.List     `tfsdk:"ssh_keys"`
 	Stopped           types.Bool     `tfsdk:"stopped"`
+	StopAfter         types.String   `tfsdk:"stop_after"`
+	ExpiresAt         types.String   `tfsdk:"expires_at"`
 	AllowCIDRs        types.List     `tfsdk:"allow_cidrs"`
 	Port              types.List     `tfsdk:"port"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
@@ -193,8 +223,57 @@ func (m vmResourceModel) workloadType() string {
 	return "vm-ubuntu"
 }
 
-// vmSpec builds the vm kind block; password empty = omit credentials (no change).
-func vmSpec(ctx context.Context, m vmResourceModel, password string) map[string]any {
+// vmWrite is what one write carries besides the machine's settings: the
+// things the platform takes as instructions rather than keeps as state.
+type vmWrite struct {
+	// password is the login's new password; empty leaves the login alone.
+	password string
+	// stopAfter starts the stop clock ("4h"), or clears it ("off"); empty
+	// leaves the stop time where it is.
+	stopAfter string
+	// create says this is the create body, where a machine's keys travel
+	// inside credentials.
+	create bool
+}
+
+// normalizeKey is a public key line the way the platform keeps it: single
+// spaces, no padding.
+func normalizeKey(line string) string { return strings.Join(strings.Fields(line), " ") }
+
+// configuredKeys is the machine's own keys as configured, or nil when the
+// configuration leaves them alone.
+func configuredKeys(ctx context.Context, l types.List) []string {
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var keys []string
+	l.ElementsAs(ctx, &keys, false)
+	return keys
+}
+
+// stopAfterToSend decides whether this update starts the stop clock: only when
+// stop_after changed or the machine is being started again, never on an apply
+// that merely touches something else — that would push the stop time back
+// every time. Removing stop_after clears the stop time.
+func stopAfterToSend(plan, state vmResourceModel) string {
+	if plan.StopAfter.IsNull() {
+		if !state.StopAfter.IsNull() {
+			return "off"
+		}
+		return ""
+	}
+	if plan.Stopped.ValueBool() {
+		return "" // a stopped machine has no clock to start
+	}
+	starting := state.Stopped.ValueBool() && !plan.Stopped.ValueBool()
+	if starting || !plan.StopAfter.Equal(state.StopAfter) {
+		return plan.StopAfter.ValueString()
+	}
+	return ""
+}
+
+// vmSpec builds the vm kind block.
+func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	spec := map[string]any{}
 	if !m.CPUs.IsNull() {
 		spec["cpus"] = m.CPUs.ValueInt64()
@@ -205,11 +284,24 @@ func vmSpec(ctx context.Context, m vmResourceModel, password string) map[string]
 	if !m.DiskGi.IsNull() {
 		spec["storageSize"] = fmt.Sprintf("%dGi", m.DiskGi.ValueInt64())
 	}
-	if password != "" {
-		spec["credentials"] = map[string]any{
+	keys := configuredKeys(ctx, m.SSHKeys)
+	if wr.password != "" {
+		creds := map[string]any{
 			"username": m.Username.ValueString(),
-			"password": password,
+			"password": wr.password,
 		}
+		if wr.create && len(keys) > 0 {
+			creds["sshKeys"] = keys
+		}
+		spec["credentials"] = creds
+	}
+	// After create the keys live on the machine itself. An empty list is never
+	// sent: the platform reads that as "keep what it has".
+	if !wr.create && len(keys) > 0 {
+		spec["sshKeys"] = keys
+	}
+	if wr.stopAfter != "" {
+		spec["stopAfter"] = wr.stopAfter
 	}
 	if !m.AllowCIDRs.IsNull() {
 		var cidrs []string
@@ -277,6 +369,83 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 	m.Endpoints = list
 }
 
+// refreshVMSpec reads back what the platform decides: when the machine will
+// stop, and its keys when the configuration leaves them alone.
+func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
+	var w *client.Workload
+	if ws, err := c.Workloads(ctx); err == nil {
+		w = findWorkload(ws, m.Name.ValueString())
+	}
+	if w == nil {
+		m.ExpiresAt = types.StringValue("")
+		if m.SSHKeys.IsUnknown() {
+			m.SSHKeys = types.ListValueMust(types.StringType, []attr.Value{})
+		}
+		return
+	}
+	m.ExpiresAt = types.StringValue(w.ExpiresAt)
+	if m.SSHKeys.IsUnknown() {
+		m.SSHKeys = keyList(remoteKeys(w.VM))
+	}
+}
+
+// remoteKeys is the machine's own keys as the platform keeps them.
+func remoteKeys(vm map[string]any) []string {
+	raw, _ := vm["sshKeys"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, k := range raw {
+		if s, ok := k.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func keyList(keys []string) types.List {
+	vals := make([]attr.Value, 0, len(keys))
+	for _, k := range keys {
+		vals = append(vals, types.StringValue(k))
+	}
+	return types.ListValueMust(types.StringType, vals)
+}
+
+// sameKeys says whether two lists hold the same keys in the same order, however
+// they are spaced.
+func sameKeys(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if normalizeKey(a[i]) != normalizeKey(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// ModifyPlan refuses the one change the platform can't make, and keeps
+// expires_at quiet on an apply that doesn't move it.
+func (r *vmResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return // create or destroy
+	}
+	var plan, state vmResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if keys := configuredKeys(ctx, plan.SSHKeys); keys != nil && len(keys) == 0 && len(state.SSHKeys.Elements()) > 0 {
+		resp.Diagnostics.AddAttributeError(path.Root("ssh_keys"), "A machine's keys can't be emptied",
+			"The platform keeps the last keys a machine was given, so an empty list would never take effect. "+
+				"Replace the key with another one, or leave ssh_keys out to stop managing it here.")
+		return
+	}
+	if stopAfterToSend(plan, state) == "" && plan.Stopped.Equal(state.Stopped) && !state.ExpiresAt.IsNull() {
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("expires_at"), state.ExpiresAt)...)
+	}
+}
+
 func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan, cfg vmResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -284,7 +453,11 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	body := vmSpec(ctx, plan, cfg.PasswordWO.ValueString())
+	wr := vmWrite{password: cfg.PasswordWO.ValueString(), create: true}
+	if !plan.Stopped.ValueBool() {
+		wr.stopAfter = plan.StopAfter.ValueString()
+	}
+	body := vmSpec(ctx, plan, wr)
 	body["id"] = plan.Name.ValueString()
 	if err := r.data.Client.CreateWorkload(ctx, plan.workloadType(), body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create VM", err)
@@ -293,7 +466,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	if plan.Stopped.ValueBool() {
 		// Born stopped: create, then immediately halt (stopped lives on the
 		// workload, not the create body).
-		w := client.Workload{ID: plan.Name.ValueString(), Type: plan.workloadType(), Stopped: true, VM: vmSpec(ctx, plan, "")}
+		w := client.Workload{ID: plan.Name.ValueString(), Type: plan.workloadType(), Stopped: true, VM: vmSpec(ctx, plan, vmWrite{})}
 		if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 			apiDiag(&resp.Diagnostics, "Cannot stop VM after create", err)
 		}
@@ -306,6 +479,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
+	refreshVMSpec(ctx, r.data.Client, &plan)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -328,6 +502,11 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	}
 	state.Desktop = types.BoolValue(w.Type == "vm-ubuntu-desktop")
 	state.Stopped = types.BoolValue(w.Stopped)
+	state.ExpiresAt = types.StringValue(w.ExpiresAt)
+	// Keep the keys as they were written unless the machine holds other ones.
+	if remote := remoteKeys(w.VM); state.SSHKeys.IsNull() || !sameKeys(configuredKeys(ctx, state.SSHKeys), remote) {
+		state.SSHKeys = keyList(remote)
+	}
 	sp := w.VM
 	if v, ok := sp["cpus"].(float64); ok && v > 0 {
 		state.CPUs = types.Int64Value(int64(v))
@@ -386,7 +565,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		ID:      plan.Name.ValueString(),
 		Type:    plan.workloadType(),
 		Stopped: plan.Stopped.ValueBool(),
-		VM:      vmSpec(ctx, plan, password),
+		VM:      vmSpec(ctx, plan, vmWrite{password: password, stopAfter: stopAfterToSend(plan, state)}),
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update VM", err)
@@ -400,6 +579,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready after update", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
+	refreshVMSpec(ctx, r.data.Client, &plan)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }

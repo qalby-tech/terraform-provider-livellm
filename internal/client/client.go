@@ -132,13 +132,16 @@ func (c *Client) Status(ctx context.Context) (*TenantStatus, error) {
 // Workload is one entry of the workspace spec's workloads list. Kind blocks
 // stay loose maps: each typed resource owns its own field mapping.
 type Workload struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Stopped bool           `json:"stopped,omitempty"`
-	VM      map[string]any `json:"vm,omitempty"`
-	Pod     map[string]any `json:"pod,omitempty"`
-	Storage map[string]any `json:"storage,omitempty"`
-	Browser map[string]any `json:"browser,omitempty"`
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Stopped bool   `json:"stopped,omitempty"`
+	// ExpiresAt is when the platform will stop this machine (RFC 3339). It is
+	// read-only: a stop time is set by sending vm.stopAfter.
+	ExpiresAt string         `json:"expiresAt,omitempty"`
+	VM        map[string]any `json:"vm,omitempty"`
+	Pod       map[string]any `json:"pod,omitempty"`
+	Storage   map[string]any `json:"storage,omitempty"`
+	Browser   map[string]any `json:"browser,omitempty"`
 }
 
 // Workloads returns the workspace spec's workloads list.

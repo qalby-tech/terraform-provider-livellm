@@ -141,3 +141,37 @@ func TestContainerAppImageAuth(t *testing.T) {
 		t.Errorf("import without state leaves the password null: %+v", got)
 	}
 }
+
+// A block's needs are checked only when the block is there: an app that just
+// runs an image must not be asked for registry credentials or a repo.
+func TestAppConfigErrors(t *testing.T) {
+	str := types.StringValue
+	null := types.StringNull()
+	unknown := types.StringUnknown()
+	git := func(url types.String) *sourceModel { return &sourceModel{Git: &gitSourceModel{URL: url}} }
+	cases := []struct {
+		name string
+		m    containerAppModel
+		want string
+	}{
+		{"an image alone", containerAppModel{Image: str("nginx")}, ""},
+		{"a repo alone", containerAppModel{Image: null, Source: git(str("https://github.com/acme/app"))}, ""},
+		{"a private image", containerAppModel{Image: str("x"), ImageAuth: &imageAuthModel{Username: str("bot"), Password: unknown}}, ""},
+		{"an image from a variable", containerAppModel{Image: unknown}, ""},
+		{"neither", containerAppModel{Image: null}, "Missing image"},
+		{"both", containerAppModel{Image: str("nginx"), Source: git(str("https://github.com/acme/app"))}, "Conflicting image and source"},
+		{"a source block without a repo", containerAppModel{Image: null, Source: &sourceModel{}}, "Missing source.git.url"},
+		{"a git block without a url", containerAppModel{Image: null, Source: git(null)}, "Missing source.git.url"},
+		{"credentials without a password", containerAppModel{Image: str("x"), ImageAuth: &imageAuthModel{Username: str("bot"), Password: null}}, "Incomplete image_auth"},
+		{"credentials for a repo", containerAppModel{Image: null, Source: git(str("https://github.com/acme/app")), ImageAuth: &imageAuthModel{Username: str("bot"), Password: str("pw")}}, "Conflicting image_auth and source"},
+	}
+	for _, c := range cases {
+		got := ""
+		if errs := appConfigErrors(c.m); len(errs) > 0 {
+			got = errs[0][0]
+		}
+		if got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}

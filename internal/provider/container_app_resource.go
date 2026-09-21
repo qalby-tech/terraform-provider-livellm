@@ -118,9 +118,12 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 					"git": schema.SingleNestedBlock{
 						Description: "The repo to build.",
 						Attributes: map[string]schema.Attribute{
+							// Needed whenever the block is there (ValidateConfig). It can't
+							// be Required: Terraform asks for a block's required
+							// attributes even when the block itself is left out.
 							"url": schema.StringAttribute{
-								Required:    true,
-								Description: "HTTPS clone URL.",
+								Optional:    true,
+								Description: "HTTPS clone URL. Required inside a source block.",
 							},
 							"ref": schema.StringAttribute{
 								Optional:    true,
@@ -141,14 +144,16 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 			"image_auth": schema.SingleNestedBlock{
 				Description: "Credentials for pulling a private image. Only with image, not with source.",
 				Attributes: map[string]schema.Attribute{
+					// Both are needed whenever the block is there (ValidateConfig);
+					// see source.git.url for why they aren't Required.
 					"username": schema.StringAttribute{
-						Required:    true,
-						Description: "Registry username.",
+						Optional:    true,
+						Description: "Registry username. Required inside an image_auth block.",
 					},
 					"password": schema.StringAttribute{
-						Required:    true,
+						Optional:    true,
 						Sensitive:   true,
-						Description: "Registry password or access token. Write-only on the platform — it is never read back.",
+						Description: "Registry password or access token. Required inside an image_auth block. Write-only on the platform — it is never read back.",
 					},
 				},
 			},
@@ -236,6 +241,40 @@ func appShapeError(m containerAppModel) (string, string) {
 		return "Conflicting image_auth and source", "image_auth is only for apps that run an image; remove it or use image instead of source."
 	}
 	return "", ""
+}
+
+// appConfigErrors checks the configuration as written, at plan time: what a
+// block needs once it is there, and which of image, source and image_auth go
+// together. A value that isn't known yet counts as set.
+func appConfigErrors(m containerAppModel) [][2]string {
+	set := func(v types.String) bool { return v.IsUnknown() || v.ValueString() != "" }
+	var out [][2]string
+	if m.Source != nil && (m.Source.Git == nil || !set(m.Source.Git.URL)) {
+		out = append(out, [2]string{"Missing source.git.url", "A source block needs a git block with the repo's HTTPS clone url."})
+	}
+	if m.ImageAuth != nil && (!set(m.ImageAuth.Username) || !set(m.ImageAuth.Password)) {
+		out = append(out, [2]string{"Incomplete image_auth", "An image_auth block needs both a username and a password."})
+	}
+	switch {
+	case !set(m.Image) && m.Source == nil:
+		out = append(out, [2]string{"Missing image", "Set image (prebuilt) or a source block with git.url (built from the repo)."})
+	case set(m.Image) && m.Source != nil:
+		out = append(out, [2]string{"Conflicting image and source", "Set image (prebuilt) or a source block, not both."})
+	case m.ImageAuth != nil && m.Source != nil:
+		out = append(out, [2]string{"Conflicting image_auth and source", "image_auth is only for apps that run an image; remove it or use image instead of source."})
+	}
+	return out
+}
+
+func (r *containerAppResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg containerAppModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	for _, e := range appConfigErrors(cfg) {
+		resp.Diagnostics.AddError(e[0], e[1])
+	}
 }
 
 func (m containerAppModel) sourceToken() string {

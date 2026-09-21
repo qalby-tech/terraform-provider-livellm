@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased (breaking)
+## 0.5.0 (breaking)
+
+- **Removed** everything that managed AI features, which the platform no
+  longer has: the `livellm_agent_master` and `livellm_ai_provider` resources,
+  `ai_daemon` and `state_repo` on `livellm_vm`, and `ai_agent` on
+  `livellm_browser`. Take them out of your configuration before upgrading.
+- **Added** to `livellm_vm`:
+  - `ssh_keys` — SSH public keys for that machine alone, installed next to the
+    workspace's own. A change reaches a running machine within a minute or two.
+    The platform keeps a machine's last keys, so an empty list is refused at
+    plan time; replace a key, or leave `ssh_keys` out to stop managing it.
+  - `stop_after` — have the platform stop the machine after a while (`"4h"`),
+    keeping its disk. The clock starts when Terraform creates the machine,
+    starts it again, or when the value changes — never on an apply that edits
+    something else.
+  - `expires_at` (read-only) — when the machine will be stopped.
+- **Fixed** `livellm_container_app`: an app with no `image_auth` block (or no
+  `source` block) was refused with "Missing Configuration for Required
+  Attribute". What each block needs is now checked only when the block is
+  there, at plan time, together with the image / source / image_auth rules
+  that used to fail only at apply.
 
 - **Changed** the provider calls the platform's shorter API paths
   (`/v1/workspace`, `/v1/status`, `/v1/workloads/…`), which never name the
