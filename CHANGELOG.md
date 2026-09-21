@@ -16,6 +16,11 @@
     starts it again, or when the value changes — never on an apply that edits
     something else.
   - `expires_at` (read-only) — when the machine will be stopped.
+- **Changed** the provider sends its changes to the workspace one at a time.
+  Terraform applies up to ten resources at once, and they all belong to one
+  workspace; sent together they queued behind each other on the platform and
+  could come back as conflicts. Waiting for a resource to come up still
+  happens in parallel.
 - **Fixed** `livellm_container_app`: an app with no `image_auth` block (or no
   `source` block) was refused with "Missing Configuration for Required
   Attribute". What each block needs is now checked only when the block is

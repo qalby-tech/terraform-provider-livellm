@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,13 @@ type Client struct {
 	endpoint string
 	apiKey   string
 	http     *http.Client
+
+	// writes sends one change to the workspace at a time. Terraform applies
+	// up to ten resources at once and they all belong to one workspace, so
+	// without this they queue up behind each other on the platform and the
+	// unlucky ones come back as conflicts. Only the write itself is held;
+	// waiting for a resource to come up happens outside it.
+	writes sync.Mutex
 }
 
 func New(endpoint, apiKey string) *Client {
@@ -160,14 +168,20 @@ func (c *Client) Workloads(ctx context.Context) ([]Workload, error) {
 // CreateWorkload posts a new workload of the given type; body is the kind's
 // flat field set (id included).
 func (c *Client) CreateWorkload(ctx context.Context, wtype string, body map[string]any) error {
+	c.writes.Lock()
+	defer c.writes.Unlock()
 	return c.do(ctx, http.MethodPost, "/v1/workloads/"+wtype, body, nil)
 }
 
 // UpdateWorkload PUTs the full desired workload (the path id wins).
 func (c *Client) UpdateWorkload(ctx context.Context, id string, w Workload) error {
+	c.writes.Lock()
+	defer c.writes.Unlock()
 	return c.do(ctx, http.MethodPut, "/v1/workloads/"+id, w, nil)
 }
 
 func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
+	c.writes.Lock()
+	defer c.writes.Unlock()
 	return c.do(ctx, http.MethodDelete, "/v1/workloads/"+id, nil, nil)
 }
