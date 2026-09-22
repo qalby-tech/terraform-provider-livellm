@@ -68,6 +68,41 @@ resource "livellm_container_app" "api" {
 }
 ```
 
+An app made of several services: they reach each other by their short names,
+on any port. A port marked `internal` has no public address.
+
+```terraform
+resource "livellm_container_app" "db" {
+  name     = "shop-db"
+  stack    = "shop"
+  hostname = "db"
+  image    = "postgres:17"
+
+  port {
+    name     = "pg"
+    port     = 5432
+    internal = true
+  }
+}
+
+resource "livellm_container_app" "web" {
+  name         = "shop-web"
+  stack        = "shop"
+  hostname     = "web"
+  image        = "ghcr.io/acme/shop:1.4"
+  starts_after = [livellm_container_app.db.name]
+
+  env = {
+    DATABASE_HOST = "db"
+  }
+
+  port {
+    name = "http"
+    port = 3000
+  }
+}
+```
+
 A private image, pulled with registry credentials:
 
 ```terraform
@@ -114,9 +149,13 @@ resource "livellm_container_app" "grafana" {
   values. The platform stores the values write-only — API responses carry the
   names only, so a value changed outside Terraform is re-asserted from your
   configuration on the next apply.
+- `stack` (String) The app this service belongs to, when an app is made of several services. Services of one stack reach each other by `hostname` on any port, and only they can; two stacks may both have a `db`. Lowercase letters, digits and hyphens, starting with a letter.
+- `hostname` (String) This service's name inside its stack. Defaults to `name`.
+- `starts_after` (List of String) Names of the apps and databases this service needs first. It starts once each one's first port accepts a connection, and none of them can be deleted while it lists them. (`depends_on` is Terraform's own word, hence the name.)
 - `port` (Block List) Exposed ports:
   - `name` (String, Required) Port name — becomes part of the hostname.
   - `port` (Number, Required) Container port.
+  - `internal` (Boolean) No public address: reachable from inside the workspace only, at `<workspace>-<name>:<port>` (and at `<hostname>:<port>` for the services of its stack); any TCP protocol.
 
 ### Read-Only
 

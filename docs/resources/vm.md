@@ -120,6 +120,7 @@ resource "livellm_vm" "eu" {
   - `port` (Number, Required) Listener port inside the VM.
   - `tcp` (Boolean) Expose as a raw TCP address instead of HTTPS.
   - `udp` (Boolean) Expose as a raw UDP address.
+  - `internal` (Boolean) No public address and no node port: reachable from inside the workspace only, at `<workspace>-<name>-internal:<port>`.
 
 ### Read-Only
 

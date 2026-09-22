@@ -143,23 +143,23 @@ func (r *storageResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 type storageModel struct {
-	Timeouts timeouts.Value `tfsdk:"timeouts"`
-	Name              types.String `tfsdk:"name"`
-	Engine            types.String `tfsdk:"engine"`
-	Version           types.String `tfsdk:"version"`
-	DiskGi            types.Int64  `tfsdk:"disk_gi"`
-	Instances         types.Int64  `tfsdk:"instances"`
-	CPU               types.String `tfsdk:"cpu"`
-	Memory            types.String `tfsdk:"memory"`
-	Username          types.String `tfsdk:"username"`
-	PasswordWO        types.String `tfsdk:"password_wo"`
-	PasswordWOVersion types.Int64  `tfsdk:"password_wo_version"`
-	Expose            types.Bool   `tfsdk:"expose"`
-	Allowlist         types.List   `tfsdk:"allowlist"`
-	BackupSchedule    types.String `tfsdk:"backup_schedule"`
-	BackupKeep        types.Int64  `tfsdk:"backup_keep"`
-	Ready             types.Bool   `tfsdk:"ready"`
-	Endpoints         types.List   `tfsdk:"endpoints"`
+	Timeouts          timeouts.Value `tfsdk:"timeouts"`
+	Name              types.String   `tfsdk:"name"`
+	Engine            types.String   `tfsdk:"engine"`
+	Version           types.String   `tfsdk:"version"`
+	DiskGi            types.Int64    `tfsdk:"disk_gi"`
+	Instances         types.Int64    `tfsdk:"instances"`
+	CPU               types.String   `tfsdk:"cpu"`
+	Memory            types.String   `tfsdk:"memory"`
+	Username          types.String   `tfsdk:"username"`
+	PasswordWO        types.String   `tfsdk:"password_wo"`
+	PasswordWOVersion types.Int64    `tfsdk:"password_wo_version"`
+	Expose            types.Bool     `tfsdk:"expose"`
+	Allowlist         types.List     `tfsdk:"allowlist"`
+	BackupSchedule    types.String   `tfsdk:"backup_schedule"`
+	BackupKeep        types.Int64    `tfsdk:"backup_keep"`
+	Ready             types.Bool     `tfsdk:"ready"`
+	Endpoints         types.List     `tfsdk:"endpoints"`
 }
 
 // storageSpec builds the kind block (also the flat create body without id).

@@ -175,3 +175,46 @@ func TestAppConfigErrors(t *testing.T) {
 		}
 	}
 }
+
+// A service of a composed app carries its stack, its hostname, what it
+// starts after and which ports are internal — the settings that were lost on
+// every apply before 0.6.0.
+func TestContainerAppSpecStack(t *testing.T) {
+	ctx := context.Background()
+	ports, _ := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
+		"name": types.StringType, "port": types.Int64Type, "internal": types.BoolType,
+	}}, []appPortModel{
+		{Name: types.StringValue("pg"), Port: types.Int64Value(5432), Internal: types.BoolValue(true)},
+		{Name: types.StringValue("http"), Port: types.Int64Value(80), Internal: types.BoolNull()},
+	})
+	after, _ := types.ListValueFrom(ctx, types.StringType, []string{"shop-cache"})
+	m := containerAppModel{
+		Name: types.StringValue("shop-db"), Image: types.StringValue("postgres:17"),
+		Stack: types.StringValue("shop"), Hostname: types.StringValue("db"), StartsAfter: after, Port: ports,
+	}
+	spec := containerAppSpec(ctx, m, false)
+	if spec["stack"] != "shop" || spec["hostname"] != "db" {
+		t.Errorf("stack/hostname: %v %v", spec["stack"], spec["hostname"])
+	}
+	if got, _ := spec["dependsOn"].([]string); len(got) != 1 || got[0] != "shop-cache" {
+		t.Errorf("dependsOn: %v", spec["dependsOn"])
+	}
+	got := spec["ports"].([]map[string]any)
+	if got[0]["internal"] != true || got[1]["internal"] != nil {
+		t.Errorf("ports: %v", got)
+	}
+	// without a stack nothing about a stack is sent, and the hostname settles to nothing
+	m2 := containerAppModel{Name: types.StringValue("web"), Image: types.StringValue("nginx"), Hostname: types.StringUnknown()}
+	if spec := containerAppSpec(ctx, m2, false); spec["stack"] != nil || spec["hostname"] != nil || spec["dependsOn"] != nil {
+		t.Errorf("a lone app sent stack fields: %v", spec)
+	}
+	settleHostname(&m2)
+	if !m2.Hostname.IsNull() {
+		t.Errorf("hostname without a stack: %v", m2.Hostname)
+	}
+	m.Hostname = types.StringUnknown()
+	settleHostname(&m)
+	if m.Hostname.ValueString() != "shop-db" {
+		t.Errorf("hostname defaulted to %q, want the name", m.Hostname.ValueString())
+	}
+}

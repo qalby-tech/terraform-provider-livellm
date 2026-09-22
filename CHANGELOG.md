@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+- **Added** to `livellm_container_app`: `stack`, `hostname` and `starts_after`
+  — an app made of several services, which reach each other by hostname —
+  and `port { internal = true }` for a port with no public address. Until now
+  a service created in the console with these settings lost them on the next
+  apply.
+- **Added** `port { internal = true }` to `livellm_vm`: a machine port
+  reachable from inside the workspace only, with no node port.
+
 ## 0.5.0 (breaking)
 
 - **Removed** everything that managed AI features, which the platform no

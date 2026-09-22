@@ -71,6 +71,27 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Optional:    true,
 				Description: "Memory request, e.g. \"512Mi\".",
 			},
+			"stack": schema.StringAttribute{
+				Optional: true,
+				Description: "The app this service belongs to, when an app is made of several services. Services of one " +
+					"stack reach each other by hostname (\"db:5432\") on any port, and only they can; two stacks may both " +
+					"have a \"db\". Lowercase letters, digits and hyphens, starting with a letter.",
+			},
+			"hostname": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "This service's name inside its stack. Defaults to name.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"starts_after": schema.ListAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
+				Description: "Names of the apps and databases this service needs first. It starts once each one's first port " +
+					"accepts a connection, and none of them can be deleted while it lists them. (depends_on is Terraform's " +
+					"own word, so this is starts_after.)",
+			},
 			"env": schema.MapAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
@@ -163,6 +184,12 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{Required: true, Description: "Port name (becomes part of the hostname)."},
 						"port": schema.Int64Attribute{Required: true, Description: "Container port."},
+						"internal": schema.BoolAttribute{
+							Optional: true,
+							Description: "No public address: the port is reachable from inside the workspace only, at " +
+								"<workspace>-<name>:<port> (and at <hostname>:<port> for the services of its stack), and may " +
+								"speak any TCP protocol — a database, a queue.",
+						},
 					},
 				},
 			},
@@ -183,8 +210,9 @@ func (r *containerAppResource) Configure(_ context.Context, req resource.Configu
 }
 
 type appPortModel struct {
-	Name types.String `tfsdk:"name"`
-	Port types.Int64  `tfsdk:"port"`
+	Name     types.String `tfsdk:"name"`
+	Port     types.Int64  `tfsdk:"port"`
+	Internal types.Bool   `tfsdk:"internal"`
 }
 
 type gitSourceModel struct {
@@ -205,20 +233,23 @@ type imageAuthModel struct {
 }
 
 type containerAppModel struct {
-	Timeouts  timeouts.Value  `tfsdk:"timeouts"`
-	Name      types.String    `tfsdk:"name"`
-	Image     types.String    `tfsdk:"image"`
-	Source    *sourceModel    `tfsdk:"source"`
-	ImageAuth *imageAuthModel `tfsdk:"image_auth"`
-	Command   types.List      `tfsdk:"command"`
-	CPU       types.String    `tfsdk:"cpu"`
-	Memory    types.String    `tfsdk:"memory"`
-	Env       types.Map       `tfsdk:"env"`
-	SecretEnv types.Map       `tfsdk:"secret_env"`
-	Port      types.List      `tfsdk:"port"`
-	Ready     types.Bool      `tfsdk:"ready"`
-	URL       types.String    `tfsdk:"url"`
-	Endpoints types.List      `tfsdk:"endpoints"`
+	Timeouts    timeouts.Value  `tfsdk:"timeouts"`
+	Name        types.String    `tfsdk:"name"`
+	Image       types.String    `tfsdk:"image"`
+	Source      *sourceModel    `tfsdk:"source"`
+	ImageAuth   *imageAuthModel `tfsdk:"image_auth"`
+	Command     types.List      `tfsdk:"command"`
+	CPU         types.String    `tfsdk:"cpu"`
+	Memory      types.String    `tfsdk:"memory"`
+	Env         types.Map       `tfsdk:"env"`
+	SecretEnv   types.Map       `tfsdk:"secret_env"`
+	Stack       types.String    `tfsdk:"stack"`
+	Hostname    types.String    `tfsdk:"hostname"`
+	StartsAfter types.List      `tfsdk:"starts_after"`
+	Port        types.List      `tfsdk:"port"`
+	Ready       types.Bool      `tfsdk:"ready"`
+	URL         types.String    `tfsdk:"url"`
+	Endpoints   types.List      `tfsdk:"endpoints"`
 }
 
 func (m containerAppModel) hasSource() bool {
@@ -360,11 +391,40 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 		m.Port.ElementsAs(ctx, &ports, false)
 		out := make([]map[string]any, 0, len(ports))
 		for _, p := range ports {
-			out = append(out, map[string]any{"name": p.Name.ValueString(), "port": p.Port.ValueInt64()})
+			e := map[string]any{"name": p.Name.ValueString(), "port": p.Port.ValueInt64()}
+			if p.Internal.ValueBool() {
+				e["internal"] = true
+			}
+			out = append(out, e)
 		}
 		spec["ports"] = out
 	}
+	if v := m.Stack.ValueString(); v != "" {
+		spec["stack"] = v
+		if h := m.Hostname.ValueString(); h != "" {
+			spec["hostname"] = h
+		}
+	}
+	if !m.StartsAfter.IsNull() && !m.StartsAfter.IsUnknown() {
+		var after []string
+		m.StartsAfter.ElementsAs(ctx, &after, false)
+		spec["dependsOn"] = after
+	}
 	return spec
+}
+
+// settleHostname is the platform's own rule for a service with a stack and
+// no hostname of its own: it answers to its name. Without a stack there is
+// no hostname.
+func settleHostname(m *containerAppModel) {
+	if !m.Hostname.IsUnknown() {
+		return
+	}
+	if m.Stack.ValueString() != "" {
+		m.Hostname = types.StringValue(m.Name.ValueString())
+	} else {
+		m.Hostname = types.StringNull()
+	}
 }
 
 // readImageAuth maps the API's imageAuth (username only) back into state,
@@ -493,6 +553,7 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 	if err := waitReady(waitCtx, r.data.Client, plan.Name.ValueString(), false); err != nil {
 		resp.Diagnostics.AddError("App did not become ready", err.Error())
 	}
+	settleHostname(&plan)
 	refreshAppStatus(ctx, r.data.Client, plan.Name.ValueString(), &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -558,6 +619,25 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	state.Env = readEnvMap(state.Env, env, true)
 	secretEnv, _ := sp["secretEnv"].([]any)
 	state.SecretEnv = readEnvMap(state.SecretEnv, secretEnv, false)
+	if v, _ := sp["stack"].(string); v != "" {
+		state.Stack = types.StringValue(v)
+		h, _ := sp["hostname"].(string)
+		state.Hostname = types.StringValue(h)
+	} else {
+		state.Stack = types.StringNull()
+		state.Hostname = types.StringNull()
+	}
+	if raw, ok := sp["dependsOn"].([]any); ok && len(raw) > 0 {
+		vals := make([]attr.Value, 0, len(raw))
+		for _, d := range raw {
+			if s, ok := d.(string); ok {
+				vals = append(vals, types.StringValue(s))
+			}
+		}
+		state.StartsAfter = types.ListValueMust(types.StringType, vals)
+	} else {
+		state.StartsAfter = types.ListNull(types.StringType)
+	}
 	refreshAppStatus(ctx, r.data.Client, state.Name.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
@@ -596,6 +676,7 @@ func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRe
 	if err := waitReady(waitCtx, r.data.Client, w.ID, false); err != nil {
 		resp.Diagnostics.AddError("App did not become ready after update", err.Error())
 	}
+	settleHostname(&plan)
 	refreshAppStatus(ctx, r.data.Client, w.ID, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }

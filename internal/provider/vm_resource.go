@@ -165,6 +165,10 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 						"port": schema.Int64Attribute{Required: true, Description: "Listener port inside the VM."},
 						"tcp":  schema.BoolAttribute{Optional: true, Description: "Expose as a raw TCP address instead of HTTPS."},
 						"udp":  schema.BoolAttribute{Optional: true, Description: "Expose as a raw UDP address."},
+						"internal": schema.BoolAttribute{
+							Optional:    true,
+							Description: "No public address and no node port: reachable from inside the workspace only, at <workspace>-<name>-internal:<port>.",
+						},
 					},
 				},
 			},
@@ -185,10 +189,11 @@ func (r *vmResource) Configure(_ context.Context, req resource.ConfigureRequest,
 }
 
 type vmPortModel struct {
-	Name types.String `tfsdk:"name"`
-	Port types.Int64  `tfsdk:"port"`
-	TCP  types.Bool   `tfsdk:"tcp"`
-	UDP  types.Bool   `tfsdk:"udp"`
+	Name     types.String `tfsdk:"name"`
+	Port     types.Int64  `tfsdk:"port"`
+	TCP      types.Bool   `tfsdk:"tcp"`
+	UDP      types.Bool   `tfsdk:"udp"`
+	Internal types.Bool   `tfsdk:"internal"`
 }
 
 type vmResourceModel struct {
@@ -319,6 +324,9 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 			}
 			if p.UDP.ValueBool() {
 				e["udp"] = true
+			}
+			if p.Internal.ValueBool() {
+				e["internal"] = true
 			}
 			out = append(out, e)
 		}
