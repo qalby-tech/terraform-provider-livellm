@@ -58,9 +58,9 @@ Manage the core of a workspace as code today:
 | Resource | What it creates |
 |---|---|
 | `livellm_vm` | Ubuntu VM (terminal or desktop), SSH keys, ports, a stop time, placement |
-| `livellm_container_app` | Container app from an image or a Git repo the platform builds |
+| `livellm_container_app` | An app from an image or a Git repo the platform builds — one service of a Composable App (`stack`, `hostname`, `starts_after`, internal ports) |
 | `livellm_storage` | Managed Postgres or Redis, backups, external TLS access |
-| `livellm_browser` | Headless Chromium with a live view and a CDP endpoint |
+| `livellm_browser` | Chromium with a live view and a CDP endpoint |
 
 Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`.
 
