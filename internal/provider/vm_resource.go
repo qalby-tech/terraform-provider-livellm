@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -42,7 +43,7 @@ func (r *vmResource) Metadata(_ context.Context, req resource.MetadataRequest, r
 
 func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "An Ubuntu VM — terminal or desktop. The SSH password is write-only and the machine can " +
+		Description: "A Linux VM — an Ubuntu terminal or desktop, or a Debian or Fedora server. The SSH password is write-only and the machine can " +
 			"carry SSH keys of its own; exposed ports get public HTTPS hostnames; stopped keeps the disk " +
 			"while halting the machine, and stop_after has the platform do that for you.",
 		Attributes: map[string]schema.Attribute{
@@ -60,6 +61,16 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Description: "GUI Linux Desktop instead of a terminal VM. Changing it replaces the VM.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.RequiresReplace(),
+				},
+			},
+			"os": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString("ubuntu"),
+				Description: "The system: ubuntu (24.04, default), debian (13) or fedora (44). Debian and Fedora are servers only (desktop = false). Changing it replaces the VM.",
+				Validators:  []validator.String{stringvalidator.OneOf("ubuntu", "debian", "fedora")},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"cpus": schema.Int64Attribute{
@@ -200,6 +211,7 @@ type vmResourceModel struct {
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 	Name              types.String   `tfsdk:"name"`
 	Desktop           types.Bool     `tfsdk:"desktop"`
+	OS                types.String   `tfsdk:"os"`
 	CPUs              types.Int64    `tfsdk:"cpus"`
 	MemoryGi          types.Int64    `tfsdk:"memory_gi"`
 	DiskGi            types.Int64    `tfsdk:"disk_gi"`
@@ -280,6 +292,10 @@ func stopAfterToSend(plan, state vmResourceModel) string {
 // vmSpec builds the vm kind block.
 func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	spec := map[string]any{}
+	// Ubuntu is the default the platform assumes; only another system is sent.
+	if os := m.OS.ValueString(); os != "" && os != "ubuntu" {
+		spec["os"] = os
+	}
 	if !m.CPUs.IsNull() {
 		spec["cpus"] = m.CPUs.ValueInt64()
 	}
@@ -509,6 +525,11 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		return
 	}
 	state.Desktop = types.BoolValue(w.Type == "vm-ubuntu-desktop")
+	if os, _ := w.VM["os"].(string); os != "" {
+		state.OS = types.StringValue(os)
+	} else {
+		state.OS = types.StringValue("ubuntu")
+	}
 	state.Stopped = types.BoolValue(w.Stopped)
 	state.ExpiresAt = types.StringValue(w.ExpiresAt)
 	// Keep the keys as they were written unless the machine holds other ones.

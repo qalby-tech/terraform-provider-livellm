@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Added** `os` to `livellm_vm`: `debian` (13) or `fedora` (44) servers next to
+  Ubuntu. Changing it replaces the machine.
+
 ## 0.6.0
 
 - **Added** to `livellm_container_app`: `stack`, `hostname` and `starts_after`

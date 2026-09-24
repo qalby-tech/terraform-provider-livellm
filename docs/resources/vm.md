@@ -1,12 +1,12 @@
 ---
 page_title: "livellm_vm Resource - livellm"
 description: |-
-  An Ubuntu VM — terminal or desktop — with SSH keys, ports, a stop time and placement.
+  A Linux VM — an Ubuntu terminal or desktop, or a Debian or Fedora server — with SSH keys, ports, a stop time and placement.
 ---
 
 # livellm_vm (Resource)
 
-Creates an Ubuntu VM. Terraform waits until the VM is up, then reports its
+Creates a Linux VM: Ubuntu by default, or Debian or Fedora with `os`. Terraform waits until the VM is up, then reports its
 SSH address and the public URL of every exposed port. The SSH password is a
 write-only argument; give the machine an SSH key of its own with `ssh_keys`,
 and a stop time with `stop_after` when it is made for one job.
@@ -47,6 +47,21 @@ resource "livellm_vm" "workstation" {
   cpus      = 4
   memory_gi = 8
   disk_gi   = 60
+
+  username            = "dev"
+  password_wo         = var.vm_password
+  password_wo_version = 1
+}
+```
+
+A Debian server (or `"fedora"`). Debian and Fedora come as servers only:
+
+```terraform
+resource "livellm_vm" "worker" {
+  name      = "worker"
+  os        = "debian"
+  cpus      = 2
+  memory_gi = 4
 
   username            = "dev"
   password_wo         = var.vm_password
@@ -104,6 +119,7 @@ resource "livellm_vm" "eu" {
 
 ### Optional
 
+- `os` (String) The system: `ubuntu` (24.04), `debian` (13) or `fedora` (44). Debian and Fedora are servers only. Replaces the VM when changed. Defaults to `ubuntu`.
 - `desktop` (Boolean) GUI Linux Desktop instead of a terminal VM. Replaces the VM when changed. Defaults to `false`.
 - `cpus` (Number) vCPU count.
 - `memory_gi` (Number) Memory in GiB.

@@ -106,3 +106,14 @@ func TestSameKeys(t *testing.T) {
 		t.Errorf("remote keys: %v", got)
 	}
 }
+
+// Only a system other than Ubuntu travels; Ubuntu is what the platform assumes.
+func TestVMSpecSystem(t *testing.T) {
+	ctx := context.Background()
+	for os, want := range map[string]any{"ubuntu": nil, "debian": "debian", "fedora": "fedora"} {
+		m := vmResourceModel{Username: types.StringValue("agent"), OS: types.StringValue(os)}
+		if got := vmSpec(ctx, m, vmWrite{})["os"]; got != want {
+			t.Errorf("%s: os=%v, want %v", os, got, want)
+		}
+	}
+}
