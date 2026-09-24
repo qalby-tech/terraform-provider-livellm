@@ -120,6 +120,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 						"url":  schema.StringAttribute{Computed: true},
 						"addr": schema.StringAttribute{Computed: true},
 						"tcp":  schema.BoolAttribute{Computed: true},
+						"udp":  schema.BoolAttribute{Computed: true},
 					},
 				},
 			},
@@ -232,6 +233,7 @@ func refreshStorageStatus(ctx context.Context, c *client.Client, m *storageModel
 			URL:  types.StringValue(e.URL),
 			Addr: types.StringValue(e.Addr),
 			TCP:  types.BoolValue(e.TCP),
+			UDP:  types.BoolValue(e.UDP),
 		})
 	}
 	list, d := types.ListValueFrom(ctx, epType, eps)

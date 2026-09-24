@@ -10,7 +10,9 @@ Runs a container app. Give it a prebuilt `image`, or a `source` block pointing
 at a Git repo with a Dockerfile: the platform clones the repo, builds the image
 and runs it. Rebuild whenever you like from the dashboard or the API (the
 platform never polls your repo). Terraform waits until the app is serving, then
-reports the public URL of every exposed port.
+reports the public address of every exposed port: an HTTPS URL for an HTTP
+port, a `host:port` for a raw TCP or UDP port. Volumes keep the app's data
+across restarts, and `stopped` keeps them while the app runs nothing.
 
 ## Example Usage
 
@@ -103,6 +105,53 @@ resource "livellm_container_app" "web" {
 }
 ```
 
+A game server: a raw TCP port open to one network, a raw UDP port open to
+everyone, and two volumes. Its addresses are in `endpoints`:
+
+```terraform
+resource "livellm_container_app" "mc" {
+  name  = "minecraft"
+  image = "itzg/minecraft-server"
+
+  env = {
+    EULA = "TRUE"
+  }
+
+  port {
+    name        = "game"
+    port        = 25565
+    tcp         = true
+    allow_cidrs = ["203.0.113.0/24"]
+  }
+
+  port {
+    name = "voice"
+    port = 9987
+    udp  = true
+  }
+
+  volume {
+    name       = "world"
+    size_gi    = 20
+    mount_path = "/data"
+  }
+
+  volume {
+    name       = "backups"
+    size_gi    = 10
+    mount_path = "/backups"
+  }
+}
+
+output "minecraft_address" {
+  value = one([for e in livellm_container_app.mc.endpoints : e.addr if e.name == "game"])
+}
+```
+
+Set `stopped = true` to stop an app you don't need right now: it runs nothing,
+its volumes are kept, and only their disk is billed. Set it back to `false` (or
+remove it) to start the app again.
+
 A private image, pulled with registry credentials:
 
 ```terraform
@@ -152,16 +201,31 @@ resource "livellm_container_app" "grafana" {
 - `stack` (String) The app this service belongs to, when an app is made of several services. Services of one stack reach each other by `hostname` on any port, and only they can; two stacks may both have a `db`. Lowercase letters, digits and hyphens, starting with a letter.
 - `hostname` (String) This service's name inside its stack. Defaults to `name`.
 - `starts_after` (List of String) Names of the apps and databases this service needs first. It starts once each one's first port accepts a connection, and none of them can be deleted while it lists them. (`depends_on` is Terraform's own word, hence the name.)
-- `port` (Block List) Exposed ports:
-  - `name` (String, Required) Port name — becomes part of the hostname.
+- `stopped` (Boolean) Stop the app without deleting it: it runs nothing, its
+  volumes are kept and only their disk is billed. Defaults to `false`; setting
+  it back to `false` starts the app again.
+- `port` (Block List) Exposed ports. A port is HTTP unless it says otherwise:
+  - `name` (String, Required) Port name — becomes part of the hostname. Lowercase letters, digits and hyphens, at most 15 characters.
   - `port` (Number, Required) Container port.
-  - `internal` (Boolean) No public address: reachable from inside the workspace only, at `<workspace>-<name>:<port>` (and at `<hostname>:<port>` for the services of its stack); any TCP protocol.
+  - `tcp` (Boolean) A raw TCP port instead of HTTP: a public `host:port` address (in `endpoints`) rather than an HTTPS hostname — a game server, a mail server, anything that isn't HTTP.
+  - `udp` (Boolean) A raw UDP port with a public `host:port` address — a VPN, DNS, voice. A port is `tcp` or `udp`, not both; add a second port for the other protocol.
+  - `internal` (Boolean) No public address: reachable from inside the workspace only, at `<workspace>-<name>:<port>` (and at `<hostname>:<port>` for the services of its stack); any TCP protocol. Not with `tcp`, `udp` or `allow_cidrs`.
+  - `allow_cidrs` (List of String) Source addresses allowed to reach the port, as CIDRs (`203.0.113.0/24`; one address is `203.0.113.7/32`). Unset = anyone. A raw port takes no password, so this is its only protection: set it unless the port is meant for the public.
+- `volume` (Block List, at most 8) Disks that keep their data when the app
+  restarts, is redeployed or is stopped:
+  - `name` (String, Required) Lowercase letters, digits and hyphens, at most 15 characters. A new name is a new, empty volume. An app that had one disk before volumes existed has it as `data`: import it and write it as `volume { name = "data" ... }` to keep it.
+  - `size_gi` (Number, Required) Size in GiB. It grows in place; a smaller size is refused at plan time.
+  - `mount_path` (String, Required) Where it appears in the container: an absolute path such as `/data`, folder names of letters, digits and `. _ @ + -`, at most 200 characters, no trailing slash. Not `/`, not in `/proc`, `/sys` or `/dev`, and not inside another volume's path.
+
+  **Removing a `volume` block deletes that volume and everything on it.** The
+  plan warns about it by name before you apply. An app with volumes runs one
+  copy of itself.
 
 ### Read-Only
 
-- `ready` (Boolean) Whether the app is running.
-- `url` (String) The first exposed port's public HTTPS URL.
-- `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`).
+- `ready` (Boolean) Whether the app is running (`false` while stopped).
+- `url` (String) The first HTTP port's public HTTPS URL.
+- `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`). An HTTP port has a `url`; a raw port has `addr` (`host:port`) with `tcp` or `udp` set.
 
 ## Import
 
@@ -170,4 +234,6 @@ terraform import livellm_container_app.web web
 ```
 
 Secret values, the repo token and the image password cannot be read back;
-set them in configuration after importing.
+set them in configuration after importing. An import reads the app's volumes:
+write each one as a `volume` block before the first apply, or the plan warns
+that it would be deleted.

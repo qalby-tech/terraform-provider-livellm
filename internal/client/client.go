@@ -103,11 +103,13 @@ func (c *Client) MyWorkspace(ctx context.Context) (*Workspace, error) {
 }
 
 // EndpointStatus is one exposed port on a workload: HTTP ports carry the
-// public HTTPS URL; raw TCP/UDP ports carry the host:port to connect to.
+// public HTTPS URL; raw TCP/UDP ports carry the host:port to connect to,
+// marked tcp or udp.
 type EndpointStatus struct {
 	Name string `json:"name"`
 	URL  string `json:"url,omitempty"`
 	TCP  bool   `json:"tcp,omitempty"`
+	UDP  bool   `json:"udp,omitempty"`
 	Addr string `json:"addr,omitempty"`
 }
 

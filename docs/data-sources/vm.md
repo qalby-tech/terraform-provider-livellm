@@ -51,4 +51,5 @@ output "api_url" {
   - `name` (String) Port name.
   - `url` (String) Public HTTPS URL — HTTP ports.
   - `addr` (String) `host:port` — raw TCP/UDP ports.
-  - `tcp` (Boolean) True for a raw TCP/UDP port.
+  - `tcp` (Boolean) True for a raw TCP port.
+  - `udp` (Boolean) True for a raw UDP port.

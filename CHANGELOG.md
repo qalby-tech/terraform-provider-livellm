@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **Added** to `livellm_container_app`:
+  - `port { tcp = true }` and `port { udp = true }` — a raw port with a public
+    `host:port` address instead of an HTTPS hostname, for anything that isn't
+    HTTP (a game server, a VPN, DNS). The address is in `endpoints`.
+  - `port { allow_cidrs = [...] }` — the source addresses allowed to reach a
+    port. Unset, a port is open to anyone; a raw port takes no password, so
+    this is its only protection.
+  - `volume { name, size_gi, mount_path }` blocks, up to 8 — disks that keep
+    their data across restarts, redeploys and stops. A volume grows in place;
+    shrinking one is refused at plan time, and a plan that removes one warns
+    by name, because removing it deletes its data. An app that had one disk
+    before volumes existed has it as the volume `data`, and import reads it.
+  - `stopped` — stop an app without deleting it: it runs nothing, keeps its
+    volumes and is billed for their disk only. `false` starts it again.
+  - Plan-time checks for all of these, matching the platform: a port is `tcp`
+    or `udp`, not both and not `internal`; an internal port takes no
+    `allow_cidrs`; `allow_cidrs` are real CIDRs; volume names are unique
+    lowercase labels of at most 15 characters; mount paths are absolute and
+    written plainly (letters, digits and `. _ @ + -`, at most 200 characters,
+    no trailing slash), unique, not `/`, not in `/proc`, `/sys` or `/dev`, and
+    not inside one another.
+  - Removing every `volume` block removes the app's volumes (the platform
+    keeps them on a save that leaves them out, so the provider says so).
+- **Added** `udp` to every resource's and data source's `endpoints`: `true`
+  for a raw UDP port, next to `tcp` for a raw TCP one.
+
 ## 0.7.0
 
 - **Added** `os` to `livellm_vm`: `debian` (13) or `fedora` (44) servers next to

@@ -72,7 +72,7 @@ resource "livellm_storage" "cache" {
 ### Read-Only
 
 - `ready` (Boolean) Whether the database is up.
-- `endpoints` (List of Object) Connection endpoints (`name`, `url`, `addr`, `tcp`) — in-cluster and, when exposed, external.
+- `endpoints` (List of Object) Connection endpoints (`name`, `url`, `addr`, `tcp`, `udp`) — in-cluster and, when exposed, external.
 
 ## Import
 

@@ -35,4 +35,4 @@ output "all_ready" {
   - `phase` (String) Lifecycle phase.
   - `ssh` (String) `host:port` for SSH. Empty until assigned.
   - `url` (String) First exposed HTTP port's URL, if any.
-  - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`).
+  - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`).

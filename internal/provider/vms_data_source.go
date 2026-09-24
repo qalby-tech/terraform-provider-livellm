@@ -51,6 +51,7 @@ func (d *vmsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 									"url":  schema.StringAttribute{Computed: true},
 									"addr": schema.StringAttribute{Computed: true},
 									"tcp":  schema.BoolAttribute{Computed: true},
+									"udp":  schema.BoolAttribute{Computed: true},
 								},
 							},
 						},
@@ -102,6 +103,7 @@ func vmModelFrom(ctx context.Context, w client.WorkloadStatus) (vmModel, diag.Di
 			URL:  types.StringValue(e.URL),
 			Addr: types.StringValue(e.Addr),
 			TCP:  types.BoolValue(e.TCP),
+			UDP:  types.BoolValue(e.UDP),
 		})
 	}
 	epList, d := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: endpointAttrTypes}, eps)

@@ -32,6 +32,7 @@ var endpointAttrTypes = map[string]attr.Type{
 	"url":  types.StringType,
 	"addr": types.StringType,
 	"tcp":  types.BoolType,
+	"udp":  types.BoolType,
 }
 
 func (d *vmDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
@@ -52,7 +53,8 @@ func (d *vmDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, res
 						"name": schema.StringAttribute{Computed: true, Description: "Port name."},
 						"url":  schema.StringAttribute{Computed: true, Description: "Public HTTPS URL (HTTP ports)."},
 						"addr": schema.StringAttribute{Computed: true, Description: "host:port (raw TCP/UDP ports)."},
-						"tcp":  schema.BoolAttribute{Computed: true, Description: "True for a raw TCP/UDP port."},
+						"tcp":  schema.BoolAttribute{Computed: true, Description: "True for a raw TCP port (addr is host:port)."},
+						"udp":  schema.BoolAttribute{Computed: true, Description: "True for a raw UDP port (addr is host:port)."},
 					},
 				},
 			},
@@ -87,6 +89,7 @@ type endpointModel struct {
 	URL  types.String `tfsdk:"url"`
 	Addr types.String `tfsdk:"addr"`
 	TCP  types.Bool   `tfsdk:"tcp"`
+	UDP  types.Bool   `tfsdk:"udp"`
 }
 
 func (d *vmDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {

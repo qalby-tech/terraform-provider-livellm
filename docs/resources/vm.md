@@ -144,7 +144,7 @@ resource "livellm_vm" "eu" {
 - `expires_at` (String) When the platform will stop the machine (RFC 3339). Empty when it has no stop time.
 - `ssh` (String) `host:port` to SSH into the VM.
 - `url` (String) The first exposed HTTP port's public HTTPS URL.
-- `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`).
+- `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`).
 
 ## Import
 
