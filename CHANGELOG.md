@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - **Added** `os` to `livellm_vm`: `debian` (13) or `fedora` (44) servers next to
   Ubuntu. Changing it replaces the machine.
