@@ -12,7 +12,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -67,9 +66,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 				Description: "Disk size in GiB (5 when unset). Growing is an in-place update; shrinking is not supported.",
 				Validators:  []validator.Int64{int64validator.AtLeast(1)},
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
+				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
 			"instances": schema.Int64Attribute{
 				Optional: true,
@@ -81,17 +78,13 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Optional:    true,
 				Computed:    true,
 				Description: "CPU, e.g. \"1\" or \"500m\" (1 when unset).",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"memory": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Memory, e.g. \"1Gi\" (1Gi when unset).",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"username": schema.StringAttribute{
 				Optional:    true,
@@ -227,7 +220,10 @@ const (
 func storageBackup(m storageModel, update bool) map[string]any {
 	switch {
 	case m.Backup != nil:
-		b := map[string]any{"enabled": true}
+		// Both are always sent: a saved database keeps what the block leaves
+		// out, so leaving the defaults to the platform would never put back a
+		// mode or keep changed elsewhere.
+		b := map[string]any{"enabled": true, "mode": defaultBackupMode, "keepDays": int64(defaultBackupKeepDays)}
 		if v := m.Backup.Mode.ValueString(); v != "" {
 			b["mode"] = v
 		}
@@ -236,7 +232,11 @@ func storageBackup(m storageModel, update bool) map[string]any {
 		}
 		return b
 	case m.BackupSchedule.ValueString() != "":
-		b := map[string]any{"enabled": true, "mode": defaultBackupMode}
+		// The deprecated form says nothing about the mode, so none is sent:
+		// the platform makes a new database daily and keeps a saved one's
+		// mode, so a database made continuous elsewhere stays continuous.
+		b := map[string]any{"enabled": true, "schedule": m.BackupSchedule.ValueString(),
+			"keepDays": int64(defaultBackupKeepDays)}
 		if !m.BackupKeep.IsNull() && !m.BackupKeep.IsUnknown() {
 			b["keepDays"] = m.BackupKeep.ValueInt64()
 		}
@@ -332,6 +332,34 @@ func readStorageBackup(state *storageModel, raw any) {
 		next.KeepDays = types.Int64Value(keep)
 	}
 	state.Backup = next
+}
+
+// keepSizeWhenUnset plans a size the configuration leaves out as what the
+// database already has — including nothing, for a database saved before the
+// platform filled sizes in. UseStateForUnknown skips a null prior value, which
+// left such a database "(known after apply)" and updated on every plan; and
+// sending the platform's CPU or memory to it would restart it with resources
+// it never had.
+type keepSizeWhenUnset struct{}
+
+func (keepSizeWhenUnset) Description(context.Context) string {
+	return "Keeps the database's current value when the configuration leaves it out."
+}
+
+func (m keepSizeWhenUnset) MarkdownDescription(ctx context.Context) string { return m.Description(ctx) }
+
+func (keepSizeWhenUnset) PlanModifyInt64(_ context.Context, req planmodifier.Int64Request, resp *planmodifier.Int64Response) {
+	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
+		return
+	}
+	resp.PlanValue = req.StateValue
+}
+
+func (keepSizeWhenUnset) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
+		return
+	}
+	resp.PlanValue = req.StateValue
 }
 
 // readStorageSizes fills the sizes the platform decided when the

@@ -10,9 +10,12 @@
   every change, so the database can be restored to any minute) or `manual`
   (nothing scheduled). `keep_days` is how many days backups are kept (10 by
   default). With the block backups are on, without it off, and a plan shows
-  backups turned on or off in the console as a change.
+  backups turned on or off in the console as a change. A block that leaves
+  `mode` or `keep_days` out means `daily` and 10 days, so a mode or keep
+  changed in the console is put back by the next apply.
 - **Deprecated** `backup_schedule` and `backup_keep`. They still work: any
-  schedule means daily backups, and `backup_keep` is the same number of days
+  schedule turns backups on (daily on a new database; a database switched to
+  continuous in the console stays continuous), and `backup_keep` is the same number of days
   as `keep_days` (it always was days, not a number of backups; its
   description said otherwise). They can't be combined with `backup`.
 - **Added** plan-time checks on `livellm_storage`: `instances` is 1 or 3,
@@ -20,7 +23,9 @@
   and has no backups).
 - **Changed** `livellm_storage` `cpu`, `memory` and `disk_gi` read back the
   sizes the platform gives a database when they are left out (1, 1Gi, 5 GiB),
-  and later changes send them back unchanged instead of dropping them.
+  and later changes send them back unchanged instead of dropping them. A
+  database saved without sizes keeps having none: it no longer plans a change
+  on every run, and is never given CPU or memory it didn't have.
 - **Added** `livellm_vm` `backup { schedule, keep }`: scheduled backups of the
   disk, keeping the last `keep` (1..100 — a count, unlike a database's days).
   A schedule set in the console now shows in the plan; before, the next apply

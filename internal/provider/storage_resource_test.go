@@ -5,7 +5,10 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 func baseStorage(engine string) storageModel {
@@ -25,6 +28,11 @@ func TestStorageBackupBody(t *testing.T) {
 	legacy := baseStorage("postgres")
 	legacy.BackupSchedule = types.StringValue("0 3 * * *")
 	legacy.BackupKeep = types.Int64Value(7)
+	legacyNoKeep := baseStorage("postgres")
+	legacyNoKeep.BackupSchedule = types.StringValue("0 3 * * *")
+
+	modeOnly := baseStorage("postgres")
+	modeOnly.Backup = &storageBackupModel{Mode: types.StringValue("continuous"), KeepDays: types.Int64Null()}
 
 	block := baseStorage("postgres")
 	block.Backup = &storageBackupModel{Mode: types.StringValue("continuous"), KeepDays: types.Int64Value(14)}
@@ -40,12 +48,16 @@ func TestStorageBackupBody(t *testing.T) {
 		update bool
 		want   any
 	}{
-		{"deprecated schedule turns daily backups on", legacy, false,
-			map[string]any{"enabled": true, "mode": "daily", "keepDays": int64(7)}},
+		{"deprecated schedule turns backups on and leaves the mode alone", legacy, false,
+			map[string]any{"enabled": true, "schedule": "0 3 * * *", "keepDays": int64(7)}},
+		{"deprecated schedule without backup_keep puts the default keep", legacyNoKeep, true,
+			map[string]any{"enabled": true, "schedule": "0 3 * * *", "keepDays": int64(10)}},
 		{"block with mode and days", block, false,
 			map[string]any{"enabled": true, "mode": "continuous", "keepDays": int64(14)}},
-		{"empty block leaves the defaults to the platform", bare, false,
-			map[string]any{"enabled": true}},
+		{"empty block sends the defaults, so a change made elsewhere is put back", bare, true,
+			map[string]any{"enabled": true, "mode": "daily", "keepDays": int64(10)}},
+		{"block with only a mode sends the default keep", modeOnly, true,
+			map[string]any{"enabled": true, "mode": "continuous", "keepDays": int64(10)}},
 		{"no backups on create sends nothing", none, false, nil},
 		{"no backups on update says off", none, true, map[string]any{"enabled": false}},
 		{"redis says nothing about backups", baseStorage("redis"), true, nil},
@@ -157,5 +169,48 @@ func TestReadStorageSizes(t *testing.T) {
 	body := storageSpec(context.Background(), m, "", true)
 	if body["storageSize"] != "5Gi" || body["cpu"] != "1" || body["memory"] != "1Gi" {
 		t.Errorf("the next write should send the sizes back: %v", body)
+	}
+}
+
+// A size the configuration leaves out plans as what the database has, even
+// nothing: a database saved without sizes never shows "(known after apply)"
+// and an update on every plan, and never gets CPU or memory it didn't have.
+func TestKeepSizeWhenUnset(t *testing.T) {
+	ctx := context.Background()
+	obj := tftypes.Object{AttributeTypes: map[string]tftypes.Type{}}
+	saved := tfsdk.State{Raw: tftypes.NewValue(obj, map[string]tftypes.Value{})}
+	creating := tfsdk.State{Raw: tftypes.NewValue(obj, nil)}
+
+	cases := []struct {
+		name          string
+		state         tfsdk.State
+		config, prior types.String
+		want          types.String
+	}{
+		{"saved without a size stays without", saved, types.StringNull(), types.StringNull(), types.StringNull()},
+		{"saved with a size keeps it", saved, types.StringNull(), types.StringValue("1"), types.StringValue("1")},
+		{"a configured size is planned", saved, types.StringValue("2"), types.StringValue("1"), types.StringValue("2")},
+		{"a new database leaves it to the platform", creating, types.StringNull(), types.StringNull(), types.StringUnknown()},
+	}
+	for _, c := range cases {
+		plan := c.config
+		if plan.IsNull() {
+			plan = types.StringUnknown()
+		}
+		resp := &planmodifier.StringResponse{PlanValue: plan}
+		keepSizeWhenUnset{}.PlanModifyString(ctx, planmodifier.StringRequest{
+			State: c.state, ConfigValue: c.config, StateValue: c.prior, PlanValue: plan,
+		}, resp)
+		if !resp.PlanValue.Equal(c.want) {
+			t.Errorf("%s: planned %v, want %v", c.name, resp.PlanValue, c.want)
+		}
+	}
+
+	resp := &planmodifier.Int64Response{PlanValue: types.Int64Unknown()}
+	keepSizeWhenUnset{}.PlanModifyInt64(ctx, planmodifier.Int64Request{
+		State: saved, ConfigValue: types.Int64Null(), StateValue: types.Int64Null(), PlanValue: types.Int64Unknown(),
+	}, resp)
+	if !resp.PlanValue.IsNull() {
+		t.Errorf("disk saved without a size: planned %v, want null", resp.PlanValue)
 	}
 }
