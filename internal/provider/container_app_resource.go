@@ -233,7 +233,7 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 						"name": schema.StringAttribute{
 							Required: true,
 							Description: "Volume name: lowercase letters, digits and hyphens, at most 15 characters. " +
-								"A new name is a new, empty volume. An app that had one disk before volumes existed has it as \"data\".",
+								"A new name is a new, empty volume.",
 						},
 						"size_gi": schema.Int64Attribute{
 							Required:    true,

@@ -218,7 +218,7 @@ resource "livellm_container_app" "grafana" {
   configured, without it.
 - `volume` (Block List, at most 8) Disks that keep their data when the app
   restarts, is redeployed or is stopped:
-  - `name` (String, Required) Lowercase letters, digits and hyphens, at most 15 characters. A new name is a new, empty volume. An app that had one disk before volumes existed has it as `data`: import it and write it as `volume { name = "data" ... }` to keep it.
+  - `name` (String, Required) Lowercase letters, digits and hyphens, at most 15 characters. A new name is a new, empty volume.
   - `size_gi` (Number, Required) Size in GiB. It grows in place; a smaller size is refused at plan time.
   - `mount_path` (String, Required) Where it appears in the container: an absolute path such as `/data`, folder names of letters, digits and `. _ @ + -`, at most 200 characters, no trailing slash. Not `/`, not in `/proc`, `/sys` or `/dev`, and not inside another volume's path.
 
