@@ -57,11 +57,12 @@ Manage the core of a workspace as code today:
 
 | Resource | What it creates |
 |---|---|
-| `livellm_vm` | Ubuntu VM (terminal or desktop), SSH keys, ports, a stop time, placement |
+| `livellm_vm` | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, placement |
 | `livellm_container_app` | An app from an image or a Git repo the platform builds — one service of a Composable App (`stack`, `hostname`, `starts_after`), HTTP, raw TCP/UDP and internal ports, volumes, stop and start |
 | `livellm_storage` | Managed Postgres or Redis, backups, external TLS access |
 | `livellm_browser` | Chromium with a live view and a CDP endpoint |
 | `livellm_browser_api` | One address that drives several browsers: fewest open tabs, sessions, or a named browser |
+| `livellm_desktop_app` | Linux desktops in containers that start in seconds, one per agent or task |
 
 Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`.
 

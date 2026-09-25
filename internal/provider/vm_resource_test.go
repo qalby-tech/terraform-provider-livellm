@@ -144,3 +144,69 @@ func TestVMBackup(t *testing.T) {
 		t.Error("no schedule reads back as no block")
 	}
 }
+
+// A Windows machine is its own type with its edition; it never sends os.
+func TestVMSpecWindows(t *testing.T) {
+	ctx := context.Background()
+	m := vmResourceModel{
+		OS:             types.StringValue("windows"),
+		WindowsEdition: types.StringValue("server"),
+		Username:       types.StringValue("admin"),
+		DiskGi:         types.Int64Value(80),
+		SSHKeys:        types.ListNull(types.StringType),
+	}
+	if got := m.workloadType(); got != "vm-windows" {
+		t.Errorf("type %q, want vm-windows", got)
+	}
+	spec := vmSpec(ctx, m, vmWrite{password: "pw12345678", create: true})
+	if spec["windowsEdition"] != "server" || spec["os"] != nil || spec["storageSize"] != "80Gi" {
+		t.Errorf("windows spec: %v", spec)
+	}
+	m.WindowsEdition = types.StringNull()
+	if spec := vmSpec(ctx, m, vmWrite{}); spec["windowsEdition"] != "desktop" {
+		t.Errorf("an unset edition should be sent as desktop: %v", spec)
+	}
+	if d := m.defaultWait(); d.Minutes() < 40 {
+		t.Errorf("Windows waits %s by default, too short for the install", d)
+	}
+	linux := vmResourceModel{OS: types.StringValue("debian"), WindowsEdition: types.StringNull(), SSHKeys: types.ListNull(types.StringType)}
+	if spec := vmSpec(ctx, linux, vmWrite{}); spec["os"] != "debian" || spec["windowsEdition"] != nil {
+		t.Errorf("debian spec: %v", spec)
+	}
+}
+
+// The platform's Windows rules, at plan time.
+func TestWindowsConfigErrors(t *testing.T) {
+	base := func() vmResourceModel {
+		return vmResourceModel{
+			OS: types.StringValue("windows"), WindowsEdition: types.StringNull(), Desktop: types.BoolNull(),
+			DiskGi: types.Int64Null(), Username: types.StringValue("admin"), SSHKeys: types.ListNull(types.StringType),
+		}
+	}
+	if errs := windowsConfigErrors(base()); len(errs) != 0 {
+		t.Errorf("a plain Windows machine: %v", errs)
+	}
+	cases := map[string]func(*vmResourceModel){
+		"disk_gi":  func(m *vmResourceModel) { m.DiskGi = types.Int64Value(40) },
+		"username": func(m *vmResourceModel) { m.Username = types.StringValue("administrator") },
+		"desktop":  func(m *vmResourceModel) { m.Desktop = types.BoolValue(true) },
+		"ssh_keys": func(m *vmResourceModel) { m.SSHKeys = keyList([]string{testKeyA}) },
+		"windows_edition": func(m *vmResourceModel) {
+			m.OS = types.StringValue("ubuntu")
+			m.WindowsEdition = types.StringValue("server")
+		},
+	}
+	for attr, change := range cases {
+		m := base()
+		change(&m)
+		errs := windowsConfigErrors(m)
+		if len(errs) != 1 || errs[0][0] != attr {
+			t.Errorf("%s: %v", attr, errs)
+		}
+	}
+	ok := base()
+	ok.DiskGi = types.Int64Value(64)
+	if errs := windowsConfigErrors(ok); len(errs) != 0 {
+		t.Errorf("64 GiB is enough: %v", errs)
+	}
+}

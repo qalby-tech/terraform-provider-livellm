@@ -122,6 +122,14 @@ type WorkloadStatus struct {
 	Message   string           `json:"message,omitempty"`
 	SSH       string           `json:"ssh,omitempty"`
 	Endpoints []EndpointStatus `json:"endpoints,omitempty"`
+	// Desktops is a Desktop App's desktops: how many should run, how many answer.
+	Desktops *DesktopCount `json:"desktops,omitempty"`
+}
+
+// DesktopCount is how many of a Desktop App's desktops should run and are ready.
+type DesktopCount struct {
+	Desired int `json:"desired"`
+	Ready   int `json:"ready"`
 }
 
 type TenantStatus struct {
@@ -154,6 +162,8 @@ type Workload struct {
 	Browser   map[string]any `json:"browser,omitempty"`
 	// Controller is a Browser API's settings (type "controller").
 	Controller map[string]any `json:"controller,omitempty"`
+	// Desktop is a Desktop App's settings (type "desktop").
+	Desktop map[string]any `json:"desktop,omitempty"`
 }
 
 // Workloads returns the workspace spec's workloads list.

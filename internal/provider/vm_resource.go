@@ -28,8 +28,9 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// livellm_vm — an Ubuntu VM (terminal or desktop), with ports, network
-// gating, placement and stop-without-destroy.
+// livellm_vm — a machine: an Ubuntu terminal or desktop, a Debian or Fedora
+// server, or Windows (11 or Server Core), with ports, network gating,
+// placement and stop-without-destroy.
 type vmResource struct {
 	data *providerData
 }
@@ -44,9 +45,9 @@ func (r *vmResource) Metadata(_ context.Context, req resource.MetadataRequest, r
 
 func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A Linux VM — an Ubuntu terminal or desktop, or a Debian or Fedora server. The SSH password is write-only and the machine can " +
-			"carry SSH keys of its own; exposed ports get public HTTPS hostnames; stopped keeps the disk " +
-			"while halting the machine, and stop_after has the platform do that for you.",
+		Description: "A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server. " +
+			"The password is write-only and a Linux machine can carry SSH keys of its own; exposed ports get public HTTPS " +
+			"hostnames; stopped keeps the disk while halting the machine, and stop_after has the platform do that for you.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:    true,
@@ -65,12 +66,25 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				},
 			},
 			"os": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString("ubuntu"),
-				Description: "The system: ubuntu (24.04, default), debian (13) or fedora (44). Debian and Fedora are servers only (desktop = false). Changing it replaces the VM.",
-				Validators:  []validator.String{stringvalidator.OneOf("ubuntu", "debian", "fedora")},
+				Optional: true,
+				Computed: true,
+				Default:  stringdefault.StaticString("ubuntu"),
+				Description: "The system: ubuntu (24.04, default), debian (13), fedora (44) or windows. Debian and Fedora are servers only " +
+					"(desktop = false); windows installs windows_edition. Changing it replaces the VM.",
+				Validators: []validator.String{stringvalidator.OneOf("ubuntu", "debian", "fedora", "windows")},
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"windows_edition": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "With os = \"windows\": desktop (Windows 11 Pro, the default) or server (Windows Server 2025, " +
+					"Server Core: a command line and no desktop). Windows installs itself on first start, which takes 15 to 35 " +
+					"minutes. Changing it replaces the VM.",
+				Validators: []validator.String{stringvalidator.OneOf("desktop", "server")},
+				PlanModifiers: []planmodifier.String{
+					windowsEditionDefault{},
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -84,11 +98,12 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			},
 			"disk_gi": schema.Int64Attribute{
 				Optional:    true,
-				Description: "Root disk in GiB.",
+				Description: "Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out).",
 			},
 			"username": schema.StringAttribute{
-				Required:    true,
-				Description: "SSH username. Changing it replaces the VM (the login is baked at first boot).",
+				Required: true,
+				Description: "The login's username (SSH on Linux, the administrator on Windows, which can't be \"Administrator\"). " +
+					"Changing it replaces the VM (the login is baked at first boot).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -97,7 +112,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Required:    true,
 				WriteOnly:   true,
 				Sensitive:   true,
-				Description: "SSH password (write-only: never stored in state). Re-sent when password_wo_version changes.",
+				Description: "The login's password, at least 8 characters (write-only: never stored in state). Re-sent when password_wo_version changes.",
 			},
 			"password_wo_version": schema.Int64Attribute{
 				Required:    true,
@@ -110,7 +125,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Description: "SSH public keys for this machine alone, one .pub line each. They are installed for " +
 					"username next to the workspace's own keys, and a change reaches a running machine within a " +
 					"minute or two. Leave it out to keep whatever the machine has; the platform keeps a machine's " +
-					"last key, so replace a key rather than emptying the list.",
+					"last key, so replace a key rather than emptying the list. Linux only.",
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
 				},
@@ -232,6 +247,7 @@ type vmResourceModel struct {
 	Name              types.String   `tfsdk:"name"`
 	Desktop           types.Bool     `tfsdk:"desktop"`
 	OS                types.String   `tfsdk:"os"`
+	WindowsEdition    types.String   `tfsdk:"windows_edition"`
 	CPUs              types.Int64    `tfsdk:"cpus"`
 	MemoryGi          types.Int64    `tfsdk:"memory_gi"`
 	DiskGi            types.Int64    `tfsdk:"disk_gi"`
@@ -268,6 +284,69 @@ func (r *vmResource) ValidateConfig(ctx context.Context, req resource.ValidateCo
 	}
 	for _, e := range vmConfigErrors(cfg) {
 		resp.Diagnostics.AddAttributeError(path.Root("backup"), e[0], e[1])
+	}
+	for _, e := range windowsConfigErrors(cfg) {
+		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
+	}
+}
+
+// windowsMinDiskGi is the smallest disk Windows installs onto.
+const windowsMinDiskGi = 64
+
+// windowsConfigErrors are the platform's rules for a Windows machine, at plan
+// time: {attribute, summary, detail}.
+func windowsConfigErrors(m vmResourceModel) [][3]string {
+	var errs [][3]string
+	win := m.OS.ValueString() == "windows"
+	if !win {
+		if !m.WindowsEdition.IsNull() && !m.WindowsEdition.IsUnknown() && !m.OS.IsUnknown() {
+			errs = append(errs, [3]string{"windows_edition", "windows_edition is for Windows",
+				"Set os = \"windows\" to install Windows, or leave windows_edition out."})
+		}
+		return errs
+	}
+	if m.Desktop.ValueBool() {
+		errs = append(errs, [3]string{"desktop", "desktop is for Ubuntu",
+			"A Windows machine's desktop comes from windows_edition = \"desktop\" (the default); leave desktop out."})
+	}
+	if !m.DiskGi.IsNull() && !m.DiskGi.IsUnknown() && m.DiskGi.ValueInt64() < windowsMinDiskGi {
+		errs = append(errs, [3]string{"disk_gi", "Disk too small for Windows",
+			fmt.Sprintf("Windows needs a disk of at least %d GiB; disk_gi is %d.", windowsMinDiskGi, m.DiskGi.ValueInt64())})
+	}
+	if strings.EqualFold(m.Username.ValueString(), "Administrator") {
+		errs = append(errs, [3]string{"username", "Username taken by Windows",
+			"\"Administrator\" is Windows' own built-in account. Pick another name; it becomes an administrator."})
+	}
+	if !m.SSHKeys.IsNull() && !m.SSHKeys.IsUnknown() {
+		errs = append(errs, [3]string{"ssh_keys", "SSH keys are for Linux machines",
+			"A Windows machine is opened with its username and password, in the console or with Remote Desktop. Leave ssh_keys out."})
+	}
+	return errs
+}
+
+// windowsEditionDefault plans the edition the platform installs when it is
+// left out: desktop on Windows, and nothing on Linux.
+type windowsEditionDefault struct{}
+
+func (windowsEditionDefault) Description(context.Context) string {
+	return "desktop on Windows when left out; null otherwise"
+}
+func (d windowsEditionDefault) MarkdownDescription(ctx context.Context) string {
+	return d.Description(ctx)
+}
+func (windowsEditionDefault) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() {
+		return
+	}
+	var os types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("os"), &os)...)
+	switch {
+	case os.IsUnknown():
+		resp.PlanValue = types.StringUnknown()
+	case os.ValueString() == "windows":
+		resp.PlanValue = types.StringValue("desktop")
+	default:
+		resp.PlanValue = types.StringNull()
 	}
 }
 
@@ -317,10 +396,22 @@ func readVMBackup(raw any) *vmBackupModel {
 }
 
 func (m vmResourceModel) workloadType() string {
+	if m.OS.ValueString() == "windows" {
+		return "vm-windows"
+	}
 	if m.Desktop.ValueBool() {
 		return "vm-ubuntu-desktop"
 	}
 	return "vm-ubuntu"
+}
+
+// defaultWait is how long an apply waits for the machine when timeouts
+// doesn't say: Windows installs itself on first start.
+func (m vmResourceModel) defaultWait() time.Duration {
+	if m.OS.ValueString() == "windows" {
+		return 45 * time.Minute
+	}
+	return 15 * time.Minute
 }
 
 // vmWrite is what one write carries besides the machine's settings: the
@@ -375,8 +466,17 @@ func stopAfterToSend(plan, state vmResourceModel) string {
 // vmSpec builds the vm kind block.
 func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	spec := map[string]any{}
-	// Ubuntu is the default the platform assumes; only another system is sent.
-	if os := m.OS.ValueString(); os != "" && os != "ubuntu" {
+	// Ubuntu is the default the platform assumes; only another Linux is sent.
+	// Windows is a type of its own, with its edition.
+	switch os := m.OS.ValueString(); os {
+	case "", "ubuntu":
+	case "windows":
+		edition := m.WindowsEdition.ValueString()
+		if edition == "" {
+			edition = "desktop"
+		}
+		spec["windowsEdition"] = edition
+	default:
 		spec["os"] = os
 	}
 	if !m.CPUs.IsNull() {
@@ -582,7 +682,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 			apiDiag(&resp.Diagnostics, "Cannot stop VM after create", err)
 		}
 	}
-	createTimeout, td := plan.Timeouts.Create(ctx, 15*time.Minute)
+	createTimeout, td := plan.Timeouts.Create(ctx, plan.defaultWait())
 	resp.Diagnostics.Append(td...)
 	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()
@@ -612,7 +712,15 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		return
 	}
 	state.Desktop = types.BoolValue(w.Type == "vm-ubuntu-desktop")
-	if os, _ := w.VM["os"].(string); os != "" {
+	state.WindowsEdition = types.StringNull()
+	if w.Type == "vm-windows" {
+		state.OS = types.StringValue("windows")
+		edition, _ := w.VM["windowsEdition"].(string)
+		if edition == "" {
+			edition = "desktop"
+		}
+		state.WindowsEdition = types.StringValue(edition)
+	} else if os, _ := w.VM["os"].(string); os != "" {
 		state.OS = types.StringValue(os)
 	} else {
 		state.OS = types.StringValue("ubuntu")
@@ -688,7 +796,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		apiDiag(&resp.Diagnostics, "Cannot update VM", err)
 		return
 	}
-	createTimeout, td := plan.Timeouts.Create(ctx, 15*time.Minute)
+	createTimeout, td := plan.Timeouts.Create(ctx, plan.defaultWait())
 	resp.Diagnostics.Append(td...)
 	waitCtx, cancel := context.WithTimeout(ctx, createTimeout)
 	defer cancel()

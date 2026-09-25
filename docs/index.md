@@ -46,11 +46,12 @@ configuration; keys are secrets.
 
 | Resource | What it creates |
 |---|---|
-| [`livellm_vm`](resources/vm.md) | Ubuntu VM (terminal or desktop), SSH keys, ports, a stop time, placement |
+| [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, placement |
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
 | [`livellm_browser`](resources/browser.md) | Headless Chromium with a live view and a CDP endpoint |
 | [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers |
+| [`livellm_desktop_app`](resources/desktop_app.md) | Linux desktops in containers that start in seconds |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md).
