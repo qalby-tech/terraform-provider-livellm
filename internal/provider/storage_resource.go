@@ -222,7 +222,8 @@ const (
 // keeps backups only with enabled: true — a schedule alone once meant none
 // were taken — so every form that asks for backups says so. On an update
 // with no backup configured it says they are off, since the platform keeps
-// an explicit off and the write replaces the database's settings.
+// an explicit off and the write replaces the database's settings. Redis has
+// no backups, so nothing is said about them.
 func storageBackup(m storageModel, update bool) map[string]any {
 	switch {
 	case m.Backup != nil:
@@ -240,7 +241,7 @@ func storageBackup(m storageModel, update bool) map[string]any {
 			b["keepDays"] = m.BackupKeep.ValueInt64()
 		}
 		return b
-	case update:
+	case update && m.Engine.ValueString() == "postgres":
 		return map[string]any{"enabled": false}
 	}
 	return nil

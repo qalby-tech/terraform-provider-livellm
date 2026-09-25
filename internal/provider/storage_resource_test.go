@@ -48,6 +48,7 @@ func TestStorageBackupBody(t *testing.T) {
 			map[string]any{"enabled": true}},
 		{"no backups on create sends nothing", none, false, nil},
 		{"no backups on update says off", none, true, map[string]any{"enabled": false}},
+		{"redis says nothing about backups", baseStorage("redis"), true, nil},
 	}
 	for _, c := range cases {
 		got := storageSpec(ctx, c.m, "", c.update)["backup"]
