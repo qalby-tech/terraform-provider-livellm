@@ -9,10 +9,13 @@
   platform: a disk of at least 64 GiB, no `Administrator` username, no
   `desktop` and no `ssh_keys`; `windows_edition` without Windows is refused.
   Import reads Windows machines as `os = "windows"`.
+- **Fixed** `livellm_vm` import reads the login's username, so the next plan
+  no longer replaces an imported machine.
 - **Added** the `livellm_desktop_app` resource: Linux desktops in containers
   that start in seconds (`replicas` 1..20, `image`, `cpu`, `memory`,
   `resolution`, `keep_files` with `storage_gi`, `stopped`), with `ready` and
-  `desktops_ready`. Import reads every setting.
+  `desktops_ready`. An apply that adds desktops waits until every one
+  answers. Import reads every setting.
 
 - **Fixed** `livellm_storage` backups were never taken: `backup_schedule`
   sent a schedule without turning backups on, so the database had none and

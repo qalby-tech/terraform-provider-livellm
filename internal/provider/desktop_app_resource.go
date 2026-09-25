@@ -219,7 +219,27 @@ func (r *desktopAppResource) wait(ctx context.Context, m desktopAppModel) error 
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
-	return waitReady(waitCtx, r.data.Client, m.Name.ValueString(), m.Stopped.ValueBool())
+	if err := waitReady(waitCtx, r.data.Client, m.Name.ValueString(), m.Stopped.ValueBool()); err != nil || m.Stopped.ValueBool() {
+		return err
+	}
+	// A Desktop App already running is ready before a desktop just added
+	// answers: wait for every one.
+	want := int(m.Replicas.ValueInt64())
+	for {
+		st, err := statusOf(waitCtx, r.data.Client, m.Name.ValueString())
+		if err == nil && st != nil && st.Desktops != nil && st.Desktops.Ready >= want {
+			return nil
+		}
+		select {
+		case <-waitCtx.Done():
+			got := 0
+			if st != nil && st.Desktops != nil {
+				got = st.Desktops.Ready
+			}
+			return fmt.Errorf("timed out waiting for %d desktops of %q (%d ready)", want, m.Name.ValueString(), got)
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
 
 func (r *desktopAppResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
