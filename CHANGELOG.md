@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased (breaking)
+
+- **Removed** `backup_schedule` and `backup_keep` from `livellm_storage`,
+  deprecated since 0.8.0; the platform no longer takes a database backup
+  schedule. Use `backup { mode, keep_days }` instead (`backup_keep = N` is
+  `keep_days = N`).
+- **Removed** reading an app's disk from before volumes existed as the volume
+  `data`: the platform reports every app's disks as volumes.
+
 ## 0.8.0
 
 - **Added** Windows to `livellm_vm`: `os = "windows"` with `windows_edition`

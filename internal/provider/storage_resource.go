@@ -112,20 +112,6 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				ElementType: types.StringType,
 				Description: "Client source CIDRs/IPs allowed when exposed. Empty = no IP restriction.",
 			},
-			"backup_schedule": schema.StringAttribute{
-				Optional: true,
-				Description: "Deprecated: use the backup block. Any schedule turns on daily backups " +
-					"(a full copy each night); the value itself is no longer used.",
-				DeprecationMessage: "Use backup { mode = \"daily\", keep_days = N } instead. " +
-					"backup_schedule still turns on daily backups.",
-			},
-			"backup_keep": schema.Int64Attribute{
-				Optional: true,
-				Description: "Deprecated: use backup.keep_days. How many DAYS backups are kept (1..365) — " +
-					"it was always days, not a number of backups. Only with backup_schedule.",
-				DeprecationMessage: "Use backup { keep_days = N } instead; it is the same number of days.",
-				Validators:         []validator.Int64{int64validator.Between(1, 365)},
-			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the database is up."},
 			"endpoints": schema.ListNestedAttribute{
 				Computed:    true,
@@ -191,8 +177,6 @@ type storageModel struct {
 	PasswordWOVersion types.Int64         `tfsdk:"password_wo_version"`
 	Expose            types.Bool          `tfsdk:"expose"`
 	Allowlist         types.List          `tfsdk:"allowlist"`
-	BackupSchedule    types.String        `tfsdk:"backup_schedule"`
-	BackupKeep        types.Int64         `tfsdk:"backup_keep"`
 	Backup            *storageBackupModel `tfsdk:"backup"`
 	Ready             types.Bool          `tfsdk:"ready"`
 	Endpoints         types.List          `tfsdk:"endpoints"`
@@ -212,8 +196,7 @@ const (
 )
 
 // storageBackup is the backup the database is written with. The platform
-// keeps backups only with enabled: true — a schedule alone once meant none
-// were taken — so every form that asks for backups says so. On an update
+// keeps backups only with enabled: true, so the block says so. On an update
 // with no backup configured it says they are off, since the platform keeps
 // an explicit off and the write replaces the database's settings. Redis has
 // no backups, so nothing is said about them.
@@ -229,16 +212,6 @@ func storageBackup(m storageModel, update bool) map[string]any {
 		}
 		if !m.Backup.KeepDays.IsNull() && !m.Backup.KeepDays.IsUnknown() {
 			b["keepDays"] = m.Backup.KeepDays.ValueInt64()
-		}
-		return b
-	case m.BackupSchedule.ValueString() != "":
-		// The deprecated form says nothing about the mode, so none is sent:
-		// the platform makes a new database daily and keeps a saved one's
-		// mode, so a database made continuous elsewhere stays continuous.
-		b := map[string]any{"enabled": true, "schedule": m.BackupSchedule.ValueString(),
-			"keepDays": int64(defaultBackupKeepDays)}
-		if !m.BackupKeep.IsNull() && !m.BackupKeep.IsUnknown() {
-			b["keepDays"] = m.BackupKeep.ValueInt64()
 		}
 		return b
 	case update && m.Engine.ValueString() == "postgres":
@@ -293,9 +266,8 @@ func storageSpec(ctx context.Context, m storageModel, password string, update bo
 	return spec
 }
 
-// readStorageBackup reads the database's backups back in the form the
-// configuration uses: the deprecated attributes when it uses them, the block
-// otherwise. Backups turned off (or on) elsewhere show as a change.
+// readStorageBackup reads the database's backups back into the block.
+// Backups turned off (or on) elsewhere show as a change.
 func readStorageBackup(state *storageModel, raw any) {
 	b, _ := raw.(map[string]any)
 	on, _ := b["enabled"].(bool)
@@ -303,18 +275,6 @@ func readStorageBackup(state *storageModel, raw any) {
 	var keep int64
 	if v, ok := b["keepDays"].(float64); ok {
 		keep = int64(v)
-	} else if v, ok := b["maxBackups"].(float64); ok {
-		keep = int64(v)
-	}
-	if !state.BackupSchedule.IsNull() {
-		if !on {
-			state.BackupSchedule, state.BackupKeep = types.StringNull(), types.Int64Null()
-			return
-		}
-		if keep > 0 && !(state.BackupKeep.IsNull() && keep == defaultBackupKeepDays) {
-			state.BackupKeep = types.Int64Value(keep)
-		}
-		return
 	}
 	if !on {
 		state.Backup = nil
@@ -416,20 +376,11 @@ func (r *storageResource) ValidateConfig(ctx context.Context, req resource.Valid
 // storageConfigErrors are the checks the platform makes, at plan time.
 func storageConfigErrors(m storageModel) [][2]string {
 	var errs [][2]string
-	legacy := !m.BackupSchedule.IsNull() || !m.BackupKeep.IsNull()
-	if m.Backup != nil && legacy {
-		errs = append(errs, [2]string{"Two ways to set backups",
-			"Use the backup block alone; backup_schedule and backup_keep are its deprecated form."})
-	}
-	if m.Backup == nil && m.BackupSchedule.IsNull() && !m.BackupKeep.IsNull() {
-		errs = append(errs, [2]string{"backup_keep without backup_schedule",
-			"backup_keep does nothing on its own. Use backup { keep_days = N }."})
-	}
 	if m.Engine.IsUnknown() || m.Engine.IsNull() {
 		return errs
 	}
 	if m.Engine.ValueString() == "redis" {
-		if m.Backup != nil || !m.BackupSchedule.IsNull() {
+		if m.Backup != nil {
 			errs = append(errs, [2]string{"Backups are for Postgres only",
 				"Redis keeps its keys on disk across restarts, but has no backups. Remove the backup settings."})
 		}

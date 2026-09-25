@@ -95,10 +95,6 @@ resource "livellm_storage" "cache" {
 - `backup` (Block) Backups, Postgres only. With the block backups are on; without it they are off (a plan shows backups turned on or off elsewhere as a change).
   - `mode` (String) `daily` (the default): a full copy each night. `continuous`: the nightly copy plus every change in between, restorable to any minute inside `keep_days`. `manual`: nothing scheduled; backups taken by hand are kept.
   - `keep_days` (Number) How many days backups are kept, `1`..`365`; `10` when unset.
-- `backup_schedule` (String, Deprecated) Use `backup`. Any value turns backups on: daily on a new database, and a database switched to continuous stays continuous.
-- `backup_keep` (Number, Deprecated) Use `backup.keep_days`. Days backups are kept (it always was days); only with `backup_schedule`.
-
-The same database can't use `backup` and the deprecated attributes together.
 
 ### Read-Only
 

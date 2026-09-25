@@ -420,13 +420,6 @@ func TestReadVolumes(t *testing.T) {
 	if len(got) != 2 || got[0].Name.ValueString() != "world" || got[0].SizeGi.ValueInt64() != 20 || got[1].SizeGi.ValueInt64() != 2048 {
 		t.Errorf("volumes: %+v", got)
 	}
-	// an app from before volumes existed: its one disk is the volume "data"
-	got = get(readVolumes(types.ListNull(types.ObjectType{AttrTypes: appVolumeAttrTypes}), map[string]any{
-		"storage": map[string]any{"size": "5Gi", "mountPath": "/var/lib/app"},
-	}))
-	if len(got) != 1 || got[0].Name.ValueString() != "data" || got[0].SizeGi.ValueInt64() != 5 || got[0].MountPath.ValueString() != "/var/lib/app" {
-		t.Errorf("storage as data: %+v", got)
-	}
 	// a size the provider can't read in GiB keeps what state had
 	prev := volumeList(t, []appVolumeModel{vol("odd", 3, "/odd")})
 	got = get(readVolumes(prev, map[string]any{"volumes": []any{map[string]any{"name": "odd", "size": "3072Mi", "mountPath": "/odd"}}}))

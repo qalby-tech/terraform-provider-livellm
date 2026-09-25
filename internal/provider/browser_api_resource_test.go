@@ -163,7 +163,7 @@ func TestReadBrowserAPI(t *testing.T) {
 	prev.AllBrowsers = types.BoolNull()
 	sp := map[string]any{
 		"browsers":         []any{"agent-2"},
-		"externalBrowsers": []any{map[string]any{"id": "office", "wsUrl": "wss://o", "authHeader": "Bearer secret", "hasAuth": true}},
+		"externalBrowsers": []any{map[string]any{"id": "office", "wsUrl": "wss://o", "hasAuth": true}},
 		"memory":           "1Gi",
 	}
 	m := readBrowserAPI(prev, sp)

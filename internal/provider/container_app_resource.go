@@ -823,19 +823,10 @@ func sizeGi(s string) (int64, bool) {
 }
 
 // readVolumes maps the app's volumes back into state, in the platform's order.
-// An app from before volumes existed may still report its one disk as
-// storage: that is the volume called "data". A size that isn't in GiB keeps
-// what state had, rather than reading as zero.
+// A size that isn't in GiB keeps what state had, rather than reading as zero.
 func readVolumes(prev types.List, sp map[string]any) types.List {
 	objType := types.ObjectType{AttrTypes: appVolumeAttrTypes}
 	raw, _ := sp["volumes"].([]any)
-	if len(raw) == 0 {
-		if st, ok := sp["storage"].(map[string]any); ok {
-			if mp, _ := st["mountPath"].(string); mp != "" {
-				raw = []any{map[string]any{"name": "data", "size": st["size"], "mountPath": mp}}
-			}
-		}
-	}
 	prevSize := map[string]types.Int64{}
 	if !prev.IsNull() && !prev.IsUnknown() {
 		for _, e := range prev.Elements() {

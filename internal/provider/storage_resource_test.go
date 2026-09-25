@@ -17,20 +17,13 @@ func baseStorage(engine string) storageModel {
 		Version: types.StringNull(), DiskGi: types.Int64Null(), Instances: types.Int64Null(),
 		CPU: types.StringNull(), Memory: types.StringNull(), Username: types.StringNull(),
 		Expose: types.BoolNull(), Allowlist: types.ListNull(types.StringType),
-		BackupSchedule: types.StringNull(), BackupKeep: types.Int64Null(),
 	}
 }
 
-// Every form that asks for backups sends enabled: a schedule alone once
-// meant backups were never taken.
+// Backups are sent as enabled, mode and keepDays, never as a schedule or a
+// number of backups.
 func TestStorageBackupBody(t *testing.T) {
 	ctx := context.Background()
-	legacy := baseStorage("postgres")
-	legacy.BackupSchedule = types.StringValue("0 3 * * *")
-	legacy.BackupKeep = types.Int64Value(7)
-	legacyNoKeep := baseStorage("postgres")
-	legacyNoKeep.BackupSchedule = types.StringValue("0 3 * * *")
-
 	modeOnly := baseStorage("postgres")
 	modeOnly.Backup = &storageBackupModel{Mode: types.StringValue("continuous"), KeepDays: types.Int64Null()}
 
@@ -48,10 +41,6 @@ func TestStorageBackupBody(t *testing.T) {
 		update bool
 		want   any
 	}{
-		{"deprecated schedule turns backups on and leaves the mode alone", legacy, false,
-			map[string]any{"enabled": true, "schedule": "0 3 * * *", "keepDays": int64(7)}},
-		{"deprecated schedule without backup_keep puts the default keep", legacyNoKeep, true,
-			map[string]any{"enabled": true, "schedule": "0 3 * * *", "keepDays": int64(10)}},
 		{"block with mode and days", block, false,
 			map[string]any{"enabled": true, "mode": "continuous", "keepDays": int64(14)}},
 		{"empty block sends the defaults, so a change made elsewhere is put back", bare, true,
@@ -64,6 +53,13 @@ func TestStorageBackupBody(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := storageSpec(ctx, c.m, "", c.update)["backup"]
+		if b, ok := got.(map[string]any); ok {
+			for _, k := range []string{"schedule", "maxBackups"} {
+				if _, sent := b[k]; sent {
+					t.Errorf("%s: sent %s", c.name, k)
+				}
+			}
+		}
 		if c.want == nil {
 			if got != nil {
 				t.Errorf("%s: sent %v, want nothing", c.name, got)
@@ -105,19 +101,6 @@ func TestReadStorageBackup(t *testing.T) {
 	if s.Backup == nil {
 		t.Error("backups on elsewhere should show")
 	}
-
-	// The deprecated form stays in its own attributes; the platform no longer
-	// echoes the schedule, so the configured one is kept.
-	s = baseStorage("postgres")
-	s.BackupSchedule = types.StringValue("@daily")
-	readStorageBackup(&s, map[string]any{"enabled": true, "mode": "daily", "keepDays": float64(7)})
-	if s.Backup != nil || s.BackupSchedule.ValueString() != "@daily" || s.BackupKeep.ValueInt64() != 7 {
-		t.Errorf("deprecated form: backup=%+v schedule=%v keep=%v", s.Backup, s.BackupSchedule, s.BackupKeep)
-	}
-	readStorageBackup(&s, nil)
-	if !s.BackupSchedule.IsNull() || !s.BackupKeep.IsNull() {
-		t.Error("deprecated form: backups off should clear the schedule")
-	}
 }
 
 func TestStorageConfigErrors(t *testing.T) {
@@ -132,11 +115,6 @@ func TestStorageConfigErrors(t *testing.T) {
 			m.Instances = types.Int64Value(3)
 			m.Backup = block
 		}, 0},
-		{"both backup forms", func(m *storageModel) {
-			m.Backup = block
-			m.BackupSchedule = types.StringValue("@daily")
-		}, 1},
-		{"backup_keep alone", func(m *storageModel) { m.BackupKeep = types.Int64Value(5) }, 1},
 	}
 	for _, c := range cases {
 		m := baseStorage("postgres")
