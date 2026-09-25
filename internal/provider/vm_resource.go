@@ -734,7 +734,9 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	sp := w.VM
 	// The login's username is kept on the machine (never its password), so an
 	// import reads it and doesn't plan a replacement.
-	if creds, ok := sp["credentials"].(map[string]any); ok {
+	if u, _ := sp["username"].(string); u != "" {
+		state.Username = types.StringValue(u)
+	} else if creds, ok := sp["credentials"].(map[string]any); ok {
 		if u, _ := creds["username"].(string); u != "" {
 			state.Username = types.StringValue(u)
 		}
