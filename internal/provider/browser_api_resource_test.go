@@ -90,7 +90,7 @@ func TestBrowserAPISpec(t *testing.T) {
 		[3]string{"lab", "ws://lab.example.com:9222/devtools/browser/y", ""})
 	got = browserAPISpec(ctx, m, map[string]string{"office": "Bearer abc"})
 	ext := got["externalBrowsers"].([]map[string]any)
-	if len(ext) != 2 || ext[0]["authHeader"] != "Bearer abc" || ext[1]["authHeader"] != nil || ext[1]["wsUrl"] != "ws://lab.example.com:9222/devtools/browser/y" {
+	if len(ext) != 2 || ext[0]["authHeader"] != "Bearer abc" || ext[1]["authHeader"] != nil || ext[1]["hasAuth"] != false || ext[0]["hasAuth"] != nil || ext[1]["wsUrl"] != "ws://lab.example.com:9222/devtools/browser/y" {
 		t.Errorf("remotes: %v", ext)
 	}
 	if !reflect.DeepEqual(got["browsers"], []string{}) {

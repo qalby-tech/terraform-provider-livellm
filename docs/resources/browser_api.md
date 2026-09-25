@@ -71,7 +71,8 @@ resource "livellm_browser_api" "all" {
   - `ws_url` (String) Its CDP websocket address, `ws://` or `wss://`.
   - `auth_wo` (String, Sensitive, Write-only) A header the remote browser
     needs, never stored in state. `Name: value` sends that header; anything
-    else (`Bearer abc`) is sent as `Authorization`. It is sent on every apply.
+    else (`Bearer abc`) is sent as `Authorization`. It is sent on every apply;
+    leaving it out removes the header the remote browser had.
 - `remote_auth_version` (Number) Change it to send new `auth_wo` values when
   nothing else changed: a write-only value alone makes no plan.
 - `cpu` (String) CPU request, e.g. `500m`.

@@ -100,7 +100,7 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 							Sensitive: true,
 							Description: "A header the remote browser needs, write-only: never stored in state. " +
 								"\"Name: value\" sends that header; anything else (\"Bearer abc\") is sent as Authorization. " +
-								"Sent on every apply; bump remote_auth_version to send a new value on its own.",
+								"Sent on every apply, and leaving it out removes the header; bump remote_auth_version to send a new value on its own.",
 						},
 					},
 				},
@@ -166,7 +166,8 @@ func (m browserAPIModel) remotes(ctx context.Context) []remoteBrowserModel {
 
 // browserAPISpec is the controller block the API takes. auth holds the
 // write-only headers by remote id, read from the configuration: they are
-// never in the plan or the state.
+// never in the plan or the state, and the platform never sends them back
+// (it answers hasAuth instead).
 func browserAPISpec(ctx context.Context, m browserAPIModel, auth map[string]string) map[string]any {
 	spec := map[string]any{}
 	if m.AllBrowsers.ValueBool() {
@@ -186,6 +187,10 @@ func browserAPISpec(ctx context.Context, m browserAPIModel, auth map[string]stri
 		e := map[string]any{"id": rb.ID.ValueString(), "wsUrl": rb.WsURL.ValueString()}
 		if a := auth[rb.ID.ValueString()]; a != "" {
 			e["authHeader"] = a
+		} else {
+			// The platform keeps a stored header unless told otherwise; the
+			// configuration has none for this remote, so it has none.
+			e["hasAuth"] = false
 		}
 		remotes = append(remotes, e)
 	}
