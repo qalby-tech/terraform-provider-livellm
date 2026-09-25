@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Added** the `livellm_browser_api` resource: one address that drives
+  several browsers. Name them in `browsers`, or drive every browser in the
+  workspace with `all_browsers = true`; `remote_browser` blocks add browsers
+  running somewhere else, with a write-only `auth_wo` header. A call that
+  names no browser goes to the one with the fewest open tabs, a session stays
+  on its browser, and `/browsers/<name>/…` or `X-Browser-Id` picks one.
+  Import reads the browsers and the remote addresses.
 - **Added** to `livellm_container_app`:
   - `port { tcp = true }` and `port { udp = true }` — a raw port with a public
     `host:port` address instead of an HTTPS hostname, for anything that isn't

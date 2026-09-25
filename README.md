@@ -61,6 +61,7 @@ Manage the core of a workspace as code today:
 | `livellm_container_app` | An app from an image or a Git repo the platform builds — one service of a Composable App (`stack`, `hostname`, `starts_after`), HTTP, raw TCP/UDP and internal ports, volumes, stop and start |
 | `livellm_storage` | Managed Postgres or Redis, backups, external TLS access |
 | `livellm_browser` | Chromium with a live view and a CDP endpoint |
+| `livellm_browser_api` | One address that drives several browsers: fewest open tabs, sessions, or a named browser |
 
 Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`.
 

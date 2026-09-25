@@ -152,6 +152,8 @@ type Workload struct {
 	Pod       map[string]any `json:"pod,omitempty"`
 	Storage   map[string]any `json:"storage,omitempty"`
 	Browser   map[string]any `json:"browser,omitempty"`
+	// Controller is a Browser API's settings (type "controller").
+	Controller map[string]any `json:"controller,omitempty"`
 }
 
 // Workloads returns the workspace spec's workloads list.

@@ -50,6 +50,7 @@ configuration; keys are secrets.
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
 | [`livellm_browser`](resources/browser.md) | Headless Chromium with a live view and a CDP endpoint |
+| [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md).
@@ -57,5 +58,5 @@ Data sources: [`livellm_workspace`](data-sources/workspace.md),
 Creates and updates wait until the resource is actually serving; plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
-~> Write-only arguments (`password_wo`) require Terraform 1.11+ or
+~> Write-only arguments (`password_wo`, `auth_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.

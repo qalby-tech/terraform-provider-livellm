@@ -98,6 +98,7 @@ func (p *livellmProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewContainerAppResource,
 		NewVMResource,
 		NewBrowserResource,
+		NewBrowserAPIResource,
 	}
 }
 
