@@ -8,7 +8,10 @@
   running somewhere else, with a write-only `auth_wo` header. A call that
   names no browser goes to the one with the fewest open tabs, a session stays
   on its browser, and `/browsers/<name>/…` or `X-Browser-Id` picks one.
-  Import reads the browsers and the remote addresses.
+  Import reads the browsers and the remote addresses. `remote_browser.has_auth`
+  says whether a header is stored; it is planned from the configuration, so a
+  header set or removed in the console shows as a change, and a plan that
+  removes a stored header warns by remote id.
 - **Added** to `livellm_container_app`:
   - `port { tcp = true }` and `port { udp = true }` — a raw port with a public
     `host:port` address instead of an HTTPS hostname, for anything that isn't

@@ -100,7 +100,13 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 							Sensitive: true,
 							Description: "A header the remote browser needs, write-only: never stored in state. " +
 								"\"Name: value\" sends that header; anything else (\"Bearer abc\") is sent as Authorization. " +
-								"Sent on every apply, and leaving it out removes the header; bump remote_auth_version to send a new value on its own.",
+								"Sent whenever Terraform creates or updates the Browser API; a remote_browser without it has its stored header " +
+								"removed on that update (has_auth then plans to false). Bump remote_auth_version to send a new value on its own.",
+						},
+						"has_auth": schema.BoolAttribute{
+							Computed: true,
+							Description: "Whether a header is stored for this remote browser (the value itself is never read back). " +
+								"Planned from the configuration: true when auth_wo is set, false when it is left out.",
 						},
 					},
 				},
@@ -122,15 +128,17 @@ func (r *browserAPIResource) Configure(_ context.Context, req resource.Configure
 }
 
 type remoteBrowserModel struct {
-	ID     types.String `tfsdk:"id"`
-	WsURL  types.String `tfsdk:"ws_url"`
-	AuthWO types.String `tfsdk:"auth_wo"`
+	ID      types.String `tfsdk:"id"`
+	WsURL   types.String `tfsdk:"ws_url"`
+	AuthWO  types.String `tfsdk:"auth_wo"`
+	HasAuth types.Bool   `tfsdk:"has_auth"`
 }
 
 var remoteBrowserAttrTypes = map[string]attr.Type{
-	"id":      types.StringType,
-	"ws_url":  types.StringType,
-	"auth_wo": types.StringType,
+	"id":       types.StringType,
+	"ws_url":   types.StringType,
+	"auth_wo":  types.StringType,
+	"has_auth": types.BoolType,
 }
 
 type browserAPIModel struct {
@@ -306,10 +314,12 @@ func readBrowserAPI(prev browserAPIModel, sp map[string]any) browserAPIModel {
 			}
 			id, _ := em["id"].(string)
 			ws, _ := em["wsUrl"].(string)
+			has, _ := em["hasAuth"].(bool)
 			vals = append(vals, types.ObjectValueMust(remoteBrowserAttrTypes, map[string]attr.Value{
-				"id":      types.StringValue(id),
-				"ws_url":  types.StringValue(ws),
-				"auth_wo": types.StringNull(),
+				"id":       types.StringValue(id),
+				"ws_url":   types.StringValue(ws),
+				"auth_wo":  types.StringNull(),
+				"has_auth": types.BoolValue(has),
 			}))
 		}
 		m.RemoteBrowser = types.ListValueMust(objType, vals)
@@ -340,10 +350,80 @@ func nullAuth(ctx context.Context, m *browserAPIModel) {
 	vals := make([]attr.Value, 0, len(remotes))
 	for _, rb := range remotes {
 		vals = append(vals, types.ObjectValueMust(remoteBrowserAttrTypes, map[string]attr.Value{
-			"id": rb.ID, "ws_url": rb.WsURL, "auth_wo": types.StringNull(),
+			"id": rb.ID, "ws_url": rb.WsURL, "auth_wo": types.StringNull(), "has_auth": rb.HasAuth,
 		}))
 	}
 	m.RemoteBrowser = types.ListValueMust(types.ObjectType{AttrTypes: remoteBrowserAttrTypes}, vals)
+}
+
+// planRemoteAuth plans each remote browser's has_auth from the configuration:
+// the apply sends auth_wo when it is set and hasAuth:false when it is not, so
+// that is what will be stored. A header stored in the console (or kept through
+// an import) with no auth_wo in the configuration therefore shows as a change
+// instead of vanishing on some later, unrelated update. It returns the remote
+// ids whose stored header this plan removes.
+func planRemoteAuth(ctx context.Context, plan, cfg, state browserAPIModel) (browserAPIModel, []string) {
+	remotes := plan.remotes(ctx)
+	if remotes == nil {
+		return plan, nil
+	}
+	cfgAuth := map[string]types.String{}
+	for _, rb := range cfg.remotes(ctx) {
+		cfgAuth[rb.ID.ValueString()] = rb.AuthWO
+	}
+	stored := map[string]bool{}
+	for _, rb := range state.remotes(ctx) {
+		stored[rb.ID.ValueString()] = rb.HasAuth.ValueBool()
+	}
+	var removed []string
+	vals := make([]attr.Value, 0, len(remotes))
+	for _, rb := range remotes {
+		a, ok := cfgAuth[rb.ID.ValueString()]
+		has := types.BoolValue(ok && !a.IsNull())
+		if rb.ID.IsUnknown() {
+			has = types.BoolUnknown()
+		} else if !has.ValueBool() && stored[rb.ID.ValueString()] {
+			removed = append(removed, rb.ID.ValueString())
+		}
+		vals = append(vals, types.ObjectValueMust(remoteBrowserAttrTypes, map[string]attr.Value{
+			"id": rb.ID, "ws_url": rb.WsURL, "auth_wo": types.StringNull(), "has_auth": has,
+		}))
+	}
+	plan.RemoteBrowser = types.ListValueMust(types.ObjectType{AttrTypes: remoteBrowserAttrTypes}, vals)
+	return plan, removed
+}
+
+func (r *browserAPIResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+	var plan, cfg browserAPIModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() || plan.RemoteBrowser.IsUnknown() {
+		return
+	}
+	state := baseBrowserAPIState()
+	if !req.State.Raw.IsNull() {
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	plan, removed := planRemoteAuth(ctx, plan, cfg, state)
+	for _, id := range removed {
+		resp.Diagnostics.AddAttributeWarning(path.Root("remote_browser"),
+			"Remote browser header will be removed",
+			fmt.Sprintf("Remote browser %q has a header stored, and its remote_browser block has no auth_wo: this apply removes it. "+
+				"Set auth_wo to keep a header.", id))
+	}
+	resp.Diagnostics.Append(resp.Plan.Set(ctx, plan)...)
+}
+
+// baseBrowserAPIState stands in for the state on a create: no remote has a
+// header stored yet.
+func baseBrowserAPIState() browserAPIModel {
+	return browserAPIModel{RemoteBrowser: types.ListNull(types.ObjectType{AttrTypes: remoteBrowserAttrTypes})}
 }
 
 func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIModel, timeout time.Duration, what string, diags interface {

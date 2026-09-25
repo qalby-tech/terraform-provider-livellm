@@ -21,6 +21,7 @@ func remoteList(t *testing.T, rbs ...[3]string) types.List {
 		}
 		vals = append(vals, types.ObjectValueMust(remoteBrowserAttrTypes, map[string]attr.Value{
 			"id": types.StringValue(rb[0]), "ws_url": types.StringValue(rb[1]), "auth_wo": auth,
+			"has_auth": types.BoolNull(),
 		}))
 	}
 	return types.ListValueMust(types.ObjectType{AttrTypes: remoteBrowserAttrTypes}, vals)
@@ -162,7 +163,7 @@ func TestReadBrowserAPI(t *testing.T) {
 	prev.AllBrowsers = types.BoolNull()
 	sp := map[string]any{
 		"browsers":         []any{"agent-2"},
-		"externalBrowsers": []any{map[string]any{"id": "office", "wsUrl": "wss://o", "authHeader": "Bearer secret"}},
+		"externalBrowsers": []any{map[string]any{"id": "office", "wsUrl": "wss://o", "authHeader": "Bearer secret", "hasAuth": true}},
 		"memory":           "1Gi",
 	}
 	m := readBrowserAPI(prev, sp)
@@ -171,7 +172,7 @@ func TestReadBrowserAPI(t *testing.T) {
 	}
 	var rbs []remoteBrowserModel
 	m.RemoteBrowser.ElementsAs(context.Background(), &rbs, false)
-	if len(rbs) != 1 || rbs[0].ID.ValueString() != "office" || rbs[0].WsURL.ValueString() != "wss://o" || !rbs[0].AuthWO.IsNull() {
+	if len(rbs) != 1 || rbs[0].ID.ValueString() != "office" || rbs[0].WsURL.ValueString() != "wss://o" || !rbs[0].AuthWO.IsNull() || !rbs[0].HasAuth.ValueBool() {
 		t.Errorf("remotes read back: %+v", rbs)
 	}
 
@@ -187,5 +188,76 @@ func TestReadBrowserAPI(t *testing.T) {
 	m = readBrowserAPI(prev, map[string]any{"browsers": []any{"agent-1"}})
 	if !m.Browsers.Equal(stringSet("agent-1")) {
 		t.Errorf("drift: %v", m.Browsers)
+	}
+}
+
+var _ resource.ResourceWithModifyPlan = &browserAPIResource{}
+
+func withHasAuth(t *testing.T, l types.List, has ...bool) types.List {
+	t.Helper()
+	var rbs []remoteBrowserModel
+	l.ElementsAs(context.Background(), &rbs, false)
+	vals := make([]attr.Value, 0, len(rbs))
+	for i, rb := range rbs {
+		vals = append(vals, types.ObjectValueMust(remoteBrowserAttrTypes, map[string]attr.Value{
+			"id": rb.ID, "ws_url": rb.WsURL, "auth_wo": rb.AuthWO, "has_auth": types.BoolValue(has[i]),
+		}))
+	}
+	return types.ListValueMust(types.ObjectType{AttrTypes: remoteBrowserAttrTypes}, vals)
+}
+
+// has_auth is planned from the configuration, so a header stored without an
+// auth_wo in the configuration is a visible change (with a warning), not a
+// silent removal on some later update.
+func TestPlanRemoteAuth(t *testing.T) {
+	ctx := context.Background()
+	cfg := baseBrowserAPI()
+	cfg.RemoteBrowser = remoteList(t, [3]string{"office", "wss://o", "Bearer abc"}, [3]string{"lab", "wss://l", ""})
+	plan := baseBrowserAPI()
+	plan.RemoteBrowser = remoteList(t, [3]string{"office", "wss://o", ""}, [3]string{"lab", "wss://l", ""})
+
+	has := func(m browserAPIModel) []bool {
+		var rbs []remoteBrowserModel
+		m.RemoteBrowser.ElementsAs(ctx, &rbs, false)
+		out := []bool{}
+		for _, rb := range rbs {
+			if !rb.AuthWO.IsNull() {
+				t.Errorf("auth_wo left in the plan for %s", rb.ID.ValueString())
+			}
+			out = append(out, rb.HasAuth.ValueBool())
+		}
+		return out
+	}
+
+	// A create: nothing stored yet, nothing removed.
+	got, removed := planRemoteAuth(ctx, plan, cfg, baseBrowserAPIState())
+	if !reflect.DeepEqual(has(got), []bool{true, false}) || len(removed) != 0 {
+		t.Errorf("create: has %v removed %v", has(got), removed)
+	}
+
+	// lab has a header stored (the console, or an import) and none in the
+	// configuration: the plan says it goes, and names it.
+	state := baseBrowserAPI()
+	state.RemoteBrowser = withHasAuth(t, plan.RemoteBrowser, true, true)
+	got, removed = planRemoteAuth(ctx, plan, cfg, state)
+	if !reflect.DeepEqual(has(got), []bool{true, false}) || !reflect.DeepEqual(removed, []string{"lab"}) {
+		t.Errorf("stored without auth_wo: has %v removed %v", has(got), removed)
+	}
+	if got.RemoteBrowser.Equal(state.RemoteBrowser) {
+		t.Error("the removal should show as a change")
+	}
+
+	// office's header was removed in the console: auth_wo plans it back.
+	state.RemoteBrowser = withHasAuth(t, plan.RemoteBrowser, false, false)
+	got, removed = planRemoteAuth(ctx, plan, cfg, state)
+	if got.RemoteBrowser.Equal(state.RemoteBrowser) || len(removed) != 0 {
+		t.Errorf("header gone in the console: has %v removed %v", has(got), removed)
+	}
+
+	// Matching: no change.
+	state.RemoteBrowser = withHasAuth(t, plan.RemoteBrowser, true, false)
+	got, _ = planRemoteAuth(ctx, plan, cfg, state)
+	if !got.RemoteBrowser.Equal(state.RemoteBrowser) {
+		t.Errorf("in step: %v vs %v", got.RemoteBrowser, state.RemoteBrowser)
 	}
 }

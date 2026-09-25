@@ -71,8 +71,10 @@ resource "livellm_browser_api" "all" {
   - `ws_url` (String) Its CDP websocket address, `ws://` or `wss://`.
   - `auth_wo` (String, Sensitive, Write-only) A header the remote browser
     needs, never stored in state. `Name: value` sends that header; anything
-    else (`Bearer abc`) is sent as `Authorization`. It is sent on every apply;
-    leaving it out removes the header the remote browser had.
+    else (`Bearer abc`) is sent as `Authorization`. It is sent whenever
+    Terraform creates or updates the Browser API. A remote browser without
+    it has its stored header removed on that update: the plan shows
+    `has_auth` going to `false` and warns.
 - `remote_auth_version` (Number) Change it to send new `auth_wo` values when
   nothing else changed: a write-only value alone makes no plan.
 - `cpu` (String) CPU request, e.g. `500m`.
@@ -85,6 +87,10 @@ A Browser API needs at least one of `browsers`, `all_browsers = true` or a
 ### Read-Only
 
 - `ready` (Boolean) Whether the Browser API is up.
+- `remote_browser.has_auth` (Boolean) Whether a header is stored for that
+  remote browser. The header itself is never read back. It is planned from the
+  configuration (`true` with `auth_wo`, `false` without), so a header set or
+  removed in the console shows as a change on the next plan.
 
 ## Import
 
@@ -92,6 +98,8 @@ A Browser API needs at least one of `browsers`, `all_browsers = true` or a
 terraform import livellm_browser_api.scrapers scrapers
 ```
 
-Import reads the browsers and the remote browsers' addresses. Their headers are
-never read back: add `auth_wo` to the configuration before the next apply, or
-the remote browser is saved without one.
+Import reads the browsers, the remote browsers' addresses and whether each has
+a header stored; the headers themselves are never read back. Add `auth_wo` to
+the configuration before the next apply: a remote browser with a header stored
+and no `auth_wo` plans `has_auth` to `false`, with a warning, and the apply
+removes its header.
