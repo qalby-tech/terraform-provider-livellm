@@ -22,9 +22,13 @@
     lowercase labels of at most 15 characters; mount paths are absolute and
     written plainly (letters, digits and `. _ @ + -`, at most 200 characters,
     no trailing slash), unique, not `/`, not in `/proc`, `/sys` or `/dev`, and
-    not inside one another.
+    not inside one another; the same number is not a tcp (or udp) port of
+    one app twice.
   - Removing every `volume` block removes the app's volumes (the platform
     keeps them on a save that leaves them out, so the provider says so).
+- **Fixed** `livellm_container_app` reads its ports back: a port changed
+  outside Terraform (an allow-list lifted in the console) shows in the plan,
+  and an import fills the `port` blocks.
 - **Added** `udp` to every resource's and data source's `endpoints`: `true`
   for a raw UDP port, next to `tcp` for a raw TCP one.
 

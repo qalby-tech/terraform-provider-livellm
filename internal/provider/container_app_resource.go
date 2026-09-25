@@ -272,6 +272,15 @@ type appPortModel struct {
 	AllowCIDRs types.List   `tfsdk:"allow_cidrs"`
 }
 
+var appPortAttrTypes = map[string]attr.Type{
+	"name":        types.StringType,
+	"port":        types.Int64Type,
+	"tcp":         types.BoolType,
+	"udp":         types.BoolType,
+	"internal":    types.BoolType,
+	"allow_cidrs": types.ListType{ElemType: types.StringType},
+}
+
 type appVolumeModel struct {
 	Name      types.String `tfsdk:"name"`
 	SizeGi    types.Int64  `tfsdk:"size_gi"`
@@ -380,6 +389,7 @@ const maxVolumes = 8
 func portErrors(ctx context.Context, ports []appPortModel) [][2]string {
 	var out [][2]string
 	seen := map[string]bool{}
+	seenRaw := map[string]bool{}
 	for _, p := range ports {
 		name := p.Name.ValueString()
 		if !p.Name.IsUnknown() {
@@ -396,6 +406,17 @@ func portErrors(ctx context.Context, ports []appPortModel) [][2]string {
 		}
 		if p.Internal.ValueBool() && (p.TCP.ValueBool() || p.UDP.ValueBool()) {
 			out = append(out, [2]string{"Conflicting internal and tcp/udp", fmt.Sprintf("Port %q: tcp and udp give a port a public address, internal keeps it inside the workspace (where it already speaks any TCP protocol). Pick one.", name)})
+		}
+		if raw := p.TCP.ValueBool() || p.UDP.ValueBool(); raw && !p.Port.IsUnknown() && !p.Port.IsNull() && !p.Internal.ValueBool() {
+			proto := "tcp"
+			if p.UDP.ValueBool() {
+				proto = "udp"
+			}
+			k := fmt.Sprintf("%d/%s", p.Port.ValueInt64(), proto)
+			if seenRaw[k] {
+				out = append(out, [2]string{"Duplicate raw port", fmt.Sprintf("Port %q: %d is already a %s port of this app.", name, p.Port.ValueInt64(), proto)})
+			}
+			seenRaw[k] = true
 		}
 		if p.AllowCIDRs.IsNull() || p.AllowCIDRs.IsUnknown() {
 			continue
@@ -851,6 +872,71 @@ func readVolumes(prev types.List, sp map[string]any) types.List {
 	return types.ListValueMust(objType, vals)
 }
 
+// readPorts maps the app's ports back into state, in the platform's order, so
+// a change made outside Terraform (an allow-list lifted in the console) shows
+// as drift and an import fills the port blocks. A flag the platform reports
+// as off keeps how the configuration wrote it (false, or left out), and so
+// does an empty allow-list.
+func readPorts(prev types.List, sp map[string]any) types.List {
+	objType := types.ObjectType{AttrTypes: appPortAttrTypes}
+	prevAttrs := map[string]map[string]attr.Value{}
+	if !prev.IsNull() && !prev.IsUnknown() {
+		for _, e := range prev.Elements() {
+			if o, ok := e.(types.Object); ok {
+				a := o.Attributes()
+				if n, ok := a["name"].(types.String); ok {
+					prevAttrs[n.ValueString()] = a
+				}
+			}
+		}
+	}
+	raw, _ := sp["ports"].([]any)
+	vals := make([]attr.Value, 0, len(raw))
+	for _, e := range raw {
+		p, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := p["name"].(string)
+		before := prevAttrs[name]
+		flag := func(key string) types.Bool {
+			if on, _ := p[key].(bool); on {
+				return types.BoolValue(true)
+			}
+			if b, ok := before[key].(types.Bool); ok && !b.IsNull() && !b.IsUnknown() && !b.ValueBool() {
+				return b
+			}
+			return types.BoolNull()
+		}
+		num := types.Int64Null()
+		if n, ok := p["port"].(float64); ok {
+			num = types.Int64Value(int64(n))
+		}
+		cidrs := types.ListNull(types.StringType)
+		access, _ := p["access"].(map[string]any)
+		if list, _ := access["allowCIDRs"].([]any); len(list) > 0 {
+			cv := make([]attr.Value, 0, len(list))
+			for _, c := range list {
+				if s, ok := c.(string); ok {
+					cv = append(cv, types.StringValue(s))
+				}
+			}
+			cidrs = types.ListValueMust(types.StringType, cv)
+		} else if l, ok := before["allow_cidrs"].(types.List); ok && !l.IsNull() && !l.IsUnknown() && len(l.Elements()) == 0 {
+			cidrs = l
+		}
+		vals = append(vals, types.ObjectValueMust(appPortAttrTypes, map[string]attr.Value{
+			"name":        types.StringValue(name),
+			"port":        num,
+			"tcp":         flag("tcp"),
+			"udp":         flag("udp"),
+			"internal":    flag("internal"),
+			"allow_cidrs": cidrs,
+		}))
+	}
+	return types.ListValueMust(objType, vals)
+}
+
 func refreshAppStatus(ctx context.Context, c *client.Client, name string, m *containerAppModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, name)
@@ -897,11 +983,9 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 		apiDiag(&resp.Diagnostics, "Cannot create container app", err)
 		return
 	}
-	if plan.Stopped.ValueBool() {
-		// Born stopped: create, then stop (stopped lives on the workload, not
-		// the create body), the same way a machine is.
-		w := client.Workload{ID: plan.Name.ValueString(), Type: "pod", Stopped: true, Pod: containerAppSpec(ctx, plan, false)}
-		if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
+	if w := stopAfterCreateBody(ctx, plan); w != nil {
+		// Born stopped: create, then stop, the same way a machine is.
+		if err := r.data.Client.UpdateWorkload(ctx, w.ID, *w); err != nil {
 			apiDiag(&resp.Diagnostics, "Cannot stop container app after create", err)
 		}
 	}
@@ -1003,10 +1087,39 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	} else {
 		state.StartsAfter = types.ListNull(types.StringType)
 	}
+	state.Port = readPorts(state.Port, sp)
 	state.Volume = readVolumes(state.Volume, sp)
 	state.Stopped = types.BoolValue(w.Stopped)
 	refreshAppStatus(ctx, r.data.Client, state.Name.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+}
+
+// updateWorkloadBody is what an apply writes for an existing app: the whole
+// app as configured, and whether it is stopped. The platform keeps an app's
+// volumes when a save leaves them out, so a configuration with no volume
+// blocks sends an empty list — that is what removes the last one. While the
+// volumes aren't known yet nothing is said about them.
+func updateWorkloadBody(ctx context.Context, plan containerAppModel, sendToken bool) client.Workload {
+	w := client.Workload{
+		ID:      plan.Name.ValueString(),
+		Type:    "pod",
+		Stopped: plan.Stopped.ValueBool(),
+		Pod:     containerAppSpec(ctx, plan, sendToken),
+	}
+	if _, ok := w.Pod["volumes"]; !ok && !plan.Volume.IsUnknown() {
+		w.Pod["volumes"] = []map[string]any{}
+	}
+	return w
+}
+
+// stopAfterCreateBody is the write that stops an app configured as stopped
+// right after it is created (stopped lives on the workload, not the create
+// body); nil when it should run.
+func stopAfterCreateBody(ctx context.Context, plan containerAppModel) *client.Workload {
+	if !plan.Stopped.ValueBool() {
+		return nil
+	}
+	return &client.Workload{ID: plan.Name.ValueString(), Type: "pod", Stopped: true, Pod: containerAppSpec(ctx, plan, false)}
 }
 
 func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -1023,17 +1136,7 @@ func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRe
 	// Re-send the repo token only when it changed (or the app just gained a
 	// source): the platform keeps the stored one otherwise.
 	sendToken := plan.sourceToken() != state.sourceToken() || !state.hasSource()
-	w := client.Workload{
-		ID:      plan.Name.ValueString(),
-		Type:    "pod",
-		Stopped: plan.Stopped.ValueBool(),
-		Pod:     containerAppSpec(ctx, plan, sendToken),
-	}
-	if _, ok := w.Pod["volumes"]; !ok && !plan.Volume.IsUnknown() {
-		// The platform keeps an app's volumes when a save leaves them out;
-		// a configuration with no volume blocks means none.
-		w.Pod["volumes"] = []map[string]any{}
-	}
+	w := updateWorkloadBody(ctx, plan, sendToken)
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update container app", err)
 		return

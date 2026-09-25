@@ -218,11 +218,6 @@ func TestContainerAppSpecStack(t *testing.T) {
 	}
 }
 
-var appPortAttrTypes = map[string]attr.Type{
-	"name": types.StringType, "port": types.Int64Type, "tcp": types.BoolType, "udp": types.BoolType,
-	"internal": types.BoolType, "allow_cidrs": types.ListType{ElemType: types.StringType},
-}
-
 // portList builds a port block list the way Terraform hands it over; unset
 // fields are null.
 func portList(t *testing.T, ports []appPortModel) types.List {
@@ -325,6 +320,10 @@ func TestPortErrors(t *testing.T) {
 		{"not a cidr", []appPortModel{with(p("mc"), func(m *appPortModel) { m.TCP = yes; m.AllowCIDRs = cidrs("203.0.113.7") })}, "Invalid allow_cidrs"},
 		{"a name too long", []appPortModel{p("a-very-long-port-name")}, "Invalid port name"},
 		{"the same name twice", []appPortModel{p("http"), p("http")}, "Duplicate port name"},
+		{"one number as tcp and udp", []appPortModel{with(p("a"), func(m *appPortModel) { m.TCP = yes }), with(p("b"), func(m *appPortModel) { m.UDP = yes })}, ""},
+		{"one number as http and tcp", []appPortModel{p("a"), with(p("b"), func(m *appPortModel) { m.TCP = yes })}, ""},
+		{"the same tcp port twice", []appPortModel{with(p("a"), func(m *appPortModel) { m.TCP = yes }), with(p("b"), func(m *appPortModel) { m.TCP = yes })}, "Duplicate raw port"},
+		{"the same udp port twice", []appPortModel{with(p("a"), func(m *appPortModel) { m.UDP = yes }), with(p("b"), func(m *appPortModel) { m.UDP = yes })}, "Duplicate raw port"},
 	}
 	for _, c := range cases {
 		got := ""
@@ -436,5 +435,101 @@ func TestReadVolumes(t *testing.T) {
 	}
 	if l := readVolumes(prev, map[string]any{}); l.IsNull() || len(l.Elements()) != 0 {
 		t.Errorf("no volumes reads as an empty list (no blocks), got %v", l)
+	}
+}
+
+// Read brings the app's ports back, so a change made outside Terraform shows
+// as drift and an import fills the port blocks; flags the platform reports
+// off keep how the configuration wrote them.
+func TestReadPorts(t *testing.T) {
+	ctx := context.Background()
+	get := func(l types.List) []appPortModel {
+		var out []appPortModel
+		if d := l.ElementsAs(ctx, &out, false); d.HasError() {
+			t.Fatalf("ports: %v", d)
+		}
+		return out
+	}
+	api := map[string]any{"ports": []any{
+		map[string]any{"name": "mc", "port": float64(25565), "tcp": true, "access": map[string]any{"allowCIDRs": []any{"203.0.113.0/24"}}},
+		map[string]any{"name": "voice", "port": float64(9987), "udp": true},
+		map[string]any{"name": "pg", "port": float64(5432), "internal": true},
+		map[string]any{"name": "http", "port": float64(8080)},
+	}}
+	// an import: nothing in state yet
+	got := get(readPorts(types.ListNull(types.ObjectType{AttrTypes: appPortAttrTypes}), api))
+	if len(got) != 4 {
+		t.Fatalf("import read %d ports", len(got))
+	}
+	var mcCIDRs []string
+	got[0].AllowCIDRs.ElementsAs(ctx, &mcCIDRs, false)
+	if got[0].Name.ValueString() != "mc" || got[0].Port.ValueInt64() != 25565 || !got[0].TCP.ValueBool() || !got[0].UDP.IsNull() || len(mcCIDRs) != 1 || mcCIDRs[0] != "203.0.113.0/24" {
+		t.Errorf("tcp port: %+v", got[0])
+	}
+	if !got[1].UDP.ValueBool() || !got[1].TCP.IsNull() || !got[1].AllowCIDRs.IsNull() {
+		t.Errorf("udp port: %+v", got[1])
+	}
+	if !got[2].Internal.ValueBool() || !got[3].TCP.IsNull() || !got[3].Internal.IsNull() {
+		t.Errorf("internal/http ports: %+v %+v", got[2], got[3])
+	}
+	// the configuration as written reads back unchanged (no drift)
+	prev := portList(t, []appPortModel{
+		{Name: types.StringValue("mc"), Port: types.Int64Value(25565), TCP: types.BoolValue(true), AllowCIDRs: cidrs("203.0.113.0/24")},
+		{Name: types.StringValue("voice"), Port: types.Int64Value(9987), UDP: types.BoolValue(true), TCP: types.BoolValue(false)},
+		{Name: types.StringValue("pg"), Port: types.Int64Value(5432), Internal: types.BoolValue(true)},
+		{Name: types.StringValue("http"), Port: types.Int64Value(8080), AllowCIDRs: cidrs()},
+	})
+	if l := readPorts(prev, api); !l.Equal(prev) {
+		t.Errorf("config read back as\n%v\nwant\n%v", l, prev)
+	}
+	// the allow-list lifted outside Terraform: drift
+	lifted := map[string]any{"ports": []any{map[string]any{"name": "mc", "port": float64(25565), "tcp": true}}}
+	got = get(readPorts(prev, lifted))
+	if len(got) != 1 || !got[0].AllowCIDRs.IsNull() {
+		t.Errorf("a lifted allow-list should read as none: %+v", got)
+	}
+	if l := readPorts(prev, map[string]any{}); l.IsNull() || len(l.Elements()) != 0 {
+		t.Errorf("no ports reads as an empty list (no blocks), got %v", l)
+	}
+}
+
+// An apply with no volume blocks sends an empty list (the platform keeps
+// volumes a save leaves out); unknown volumes say nothing; stopped goes along.
+func TestUpdateWorkloadBody(t *testing.T) {
+	ctx := context.Background()
+	base := containerAppModel{
+		Name: types.StringValue("web"), Image: types.StringValue("nginx"),
+		Port:   types.ListNull(types.ObjectType{AttrTypes: appPortAttrTypes}),
+		Volume: types.ListNull(types.ObjectType{AttrTypes: appVolumeAttrTypes}),
+	}
+	w := updateWorkloadBody(ctx, base, false)
+	if v, ok := w.Pod["volumes"].([]map[string]any); !ok || len(v) != 0 {
+		t.Errorf("no volume blocks should send volumes: [], got %#v", w.Pod["volumes"])
+	}
+	if w.Stopped || w.ID != "web" || w.Type != "pod" {
+		t.Errorf("workload: %+v", w)
+	}
+	empty := base
+	empty.Volume = volumeList(t, nil)
+	if v, ok := updateWorkloadBody(ctx, empty, false).Pod["volumes"].([]map[string]any); !ok || len(v) != 0 {
+		t.Errorf("an empty volume list should send volumes: [], got %#v", v)
+	}
+	unknown := base
+	unknown.Volume = types.ListUnknown(types.ObjectType{AttrTypes: appVolumeAttrTypes})
+	if _, ok := updateWorkloadBody(ctx, unknown, false).Pod["volumes"]; ok {
+		t.Error("unknown volumes should not be sent")
+	}
+	kept := base
+	kept.Volume = volumeList(t, []appVolumeModel{vol("data", 10, "/data")})
+	kept.Stopped = types.BoolValue(true)
+	w = updateWorkloadBody(ctx, kept, false)
+	if v, _ := w.Pod["volumes"].([]map[string]any); len(v) != 1 || v[0]["name"] != "data" || !w.Stopped {
+		t.Errorf("volumes and stopped: %+v", w)
+	}
+	if stopAfterCreateBody(ctx, base) != nil {
+		t.Error("a running app needs no stop after create")
+	}
+	if s := stopAfterCreateBody(ctx, kept); s == nil || !s.Stopped || s.ID != "web" || s.Pod["image"] != "nginx" {
+		t.Errorf("a stopped app is stopped right after create: %+v", s)
 	}
 }

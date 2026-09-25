@@ -208,9 +208,14 @@ resource "livellm_container_app" "grafana" {
   - `name` (String, Required) Port name — becomes part of the hostname. Lowercase letters, digits and hyphens, at most 15 characters.
   - `port` (Number, Required) Container port.
   - `tcp` (Boolean) A raw TCP port instead of HTTP: a public `host:port` address (in `endpoints`) rather than an HTTPS hostname — a game server, a mail server, anything that isn't HTTP.
-  - `udp` (Boolean) A raw UDP port with a public `host:port` address — a VPN, DNS, voice. A port is `tcp` or `udp`, not both; add a second port for the other protocol.
+  - `udp` (Boolean) A raw UDP port with a public `host:port` address — a VPN, DNS, voice. A port is `tcp` or `udp`, not both; add a second port for the other protocol. One number can be a tcp port and a udp port of the same app, but not the same protocol twice.
   - `internal` (Boolean) No public address: reachable from inside the workspace only, at `<workspace>-<name>:<port>` (and at `<hostname>:<port>` for the services of its stack); any TCP protocol. Not with `tcp`, `udp` or `allow_cidrs`.
   - `allow_cidrs` (List of String) Source addresses allowed to reach the port, as CIDRs (`203.0.113.0/24`; one address is `203.0.113.7/32`). Unset = anyone. A raw port takes no password, so this is its only protection: set it unless the port is meant for the public.
+
+  Ports are read back on every refresh, so a port changed outside Terraform
+  (an allow-list lifted in the console) shows in the plan. A password on an
+  HTTP port is set in the console only; an apply writes the ports as
+  configured, without it.
 - `volume` (Block List, at most 8) Disks that keep their data when the app
   restarts, is redeployed or is stopped:
   - `name` (String, Required) Lowercase letters, digits and hyphens, at most 15 characters. A new name is a new, empty volume. An app that had one disk before volumes existed has it as `data`: import it and write it as `volume { name = "data" ... }` to keep it.
@@ -234,6 +239,7 @@ terraform import livellm_container_app.web web
 ```
 
 Secret values, the repo token and the image password cannot be read back;
-set them in configuration after importing. An import reads the app's volumes:
+set them in configuration after importing. An import reads the app's ports
+and volumes:
 write each one as a `volume` block before the first apply, or the plan warns
 that it would be deleted.
