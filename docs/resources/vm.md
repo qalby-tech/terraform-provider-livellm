@@ -108,6 +108,20 @@ resource "livellm_vm" "eu" {
 }
 ```
 
+With a backup each night, the last seven kept:
+
+```terraform
+resource "livellm_vm" "build" {
+  name = "build-box"
+  # …credentials…
+
+  backup {
+    schedule = "@daily"
+    keep     = 7
+  }
+}
+```
+
 ## Schema
 
 ### Required
@@ -131,6 +145,9 @@ resource "livellm_vm" "eu" {
 - `placement_strategy` (String) `region` or `host`. Omit for automatic placement (the default).
 - `placement_region` (String) Region to schedule into.
 - `placement_host` (String) Host id to pin to.
+- `backup` (Block) Scheduled backups of the disk. Without the block none are scheduled; backups taken by hand are kept either way. A backup restores in place, with the machine stopped.
+  - `schedule` (String, Required in the block) `@hourly`, `@daily`, `@weekly`, `@monthly` or a 5-field cron expression (UTC).
+  - `keep` (Number, Required in the block) How many scheduled backups are kept, `1`..`100` — a count, unlike a database's `keep_days`.
 - `port` (Block List) Exposed ports:
   - `name` (String, Required) Port name — part of the hostname for HTTP ports.
   - `port` (Number, Required) Listener port inside the VM.

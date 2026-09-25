@@ -117,3 +117,30 @@ func TestVMSpecSystem(t *testing.T) {
 		}
 	}
 }
+
+func TestVMBackup(t *testing.T) {
+	cases := []struct {
+		name string
+		b    *vmBackupModel
+		want int
+	}{
+		{"no block", nil, 0},
+		{"daily, keep 7", &vmBackupModel{Schedule: types.StringValue("@daily"), Keep: types.Int64Value(7)}, 0},
+		{"cron", &vmBackupModel{Schedule: types.StringValue("0 3 * * *"), Keep: types.Int64Value(3)}, 0},
+		{"no schedule", &vmBackupModel{Schedule: types.StringNull(), Keep: types.Int64Value(3)}, 1},
+		{"bad schedule", &vmBackupModel{Schedule: types.StringValue("nightly"), Keep: types.Int64Value(3)}, 1},
+		{"no keep", &vmBackupModel{Schedule: types.StringValue("@daily"), Keep: types.Int64Null()}, 1},
+	}
+	for _, c := range cases {
+		if got := vmConfigErrors(vmResourceModel{Backup: c.b}); len(got) != c.want {
+			t.Errorf("%s: %v, want %d errors", c.name, got, c.want)
+		}
+	}
+	if got := readVMBackup(map[string]any{"schedule": "@daily", "keep": float64(7)}); got == nil ||
+		got.Schedule.ValueString() != "@daily" || got.Keep.ValueInt64() != 7 {
+		t.Errorf("read: %+v", got)
+	}
+	if readVMBackup(nil) != nil || readVMBackup(map[string]any{"keep": float64(3)}) != nil {
+		t.Error("no schedule reads back as no block")
+	}
+}

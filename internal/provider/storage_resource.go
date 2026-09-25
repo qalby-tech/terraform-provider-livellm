@@ -12,11 +12,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
@@ -38,7 +40,7 @@ func (r *storageResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A managed database — Postgres or Redis — with optional scheduled backups and " +
+		Description: "A managed database — Postgres or Redis — with optional backups (Postgres) and " +
 			"external TLS exposure. Credentials are write-only.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
@@ -62,19 +64,34 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			},
 			"disk_gi": schema.Int64Attribute{
 				Optional:    true,
-				Description: "Disk size in GiB. Growing is an in-place update; shrinking is not supported.",
+				Computed:    true,
+				Description: "Disk size in GiB (5 when unset). Growing is an in-place update; shrinking is not supported.",
+				Validators:  []validator.Int64{int64validator.AtLeast(1)},
+				PlanModifiers: []planmodifier.Int64{
+					int64planmodifier.UseStateForUnknown(),
+				},
 			},
 			"instances": schema.Int64Attribute{
-				Optional:    true,
-				Description: "Instance count (Postgres HA).",
+				Optional: true,
+				Description: "1, or 3 for Postgres: two standby copies, one of which takes over if the main one fails. " +
+					"Redis runs as one instance.",
+				Validators: []validator.Int64{int64validator.OneOf(1, 3)},
 			},
 			"cpu": schema.StringAttribute{
 				Optional:    true,
-				Description: "CPU request, e.g. \"500m\".",
+				Computed:    true,
+				Description: "CPU, e.g. \"1\" or \"500m\" (1 when unset).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"memory": schema.StringAttribute{
 				Optional:    true,
-				Description: "Memory request, e.g. \"1Gi\".",
+				Computed:    true,
+				Description: "Memory, e.g. \"1Gi\" (1Gi when unset).",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"username": schema.StringAttribute{
 				Optional:    true,
@@ -103,12 +120,18 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description: "Client source CIDRs/IPs allowed when exposed. Empty = no IP restriction.",
 			},
 			"backup_schedule": schema.StringAttribute{
-				Optional:    true,
-				Description: "Backup schedule (Postgres): @hourly/@daily/@weekly/@monthly or 5-field cron.",
+				Optional: true,
+				Description: "Deprecated: use the backup block. Any schedule turns on daily backups " +
+					"(a full copy each night); the value itself is no longer used.",
+				DeprecationMessage: "Use backup { mode = \"daily\", keep_days = N } instead. " +
+					"backup_schedule still turns on daily backups.",
 			},
 			"backup_keep": schema.Int64Attribute{
-				Optional:    true,
-				Description: "How many scheduled backups to retain.",
+				Optional: true,
+				Description: "Deprecated: use backup.keep_days. How many DAYS backups are kept (1..365) — " +
+					"it was always days, not a number of backups. Only with backup_schedule.",
+				DeprecationMessage: "Use backup { keep_days = N } instead; it is the same number of days.",
+				Validators:         []validator.Int64{int64validator.Between(1, 365)},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the database is up."},
 			"endpoints": schema.ListNestedAttribute{
@@ -127,6 +150,24 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
+			"backup": schema.SingleNestedBlock{
+				Description: "Backups (Postgres only). With the block, backups are on; without it, off. " +
+					"A backup restores into a new database; the one it came from keeps running.",
+				Attributes: map[string]schema.Attribute{
+					"mode": schema.StringAttribute{
+						Optional: true,
+						Description: "daily (default): a full copy each night. continuous: the nightly copy plus every " +
+							"change in between, so the database can be restored to any minute inside keep_days. " +
+							"manual: nothing is scheduled; a backup is taken only when asked for.",
+						Validators: []validator.String{stringvalidator.OneOf("daily", "continuous", "manual")},
+					},
+					"keep_days": schema.Int64Attribute{
+						Optional:    true,
+						Description: "How many days backups are kept, 1..365 (10 when unset). Days, not a number of backups.",
+						Validators:  []validator.Int64{int64validator.Between(1, 365)},
+					},
+				},
+			},
 		},
 	}
 }
@@ -144,32 +185,74 @@ func (r *storageResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 type storageModel struct {
-	Timeouts          timeouts.Value `tfsdk:"timeouts"`
-	Name              types.String   `tfsdk:"name"`
-	Engine            types.String   `tfsdk:"engine"`
-	Version           types.String   `tfsdk:"version"`
-	DiskGi            types.Int64    `tfsdk:"disk_gi"`
-	Instances         types.Int64    `tfsdk:"instances"`
-	CPU               types.String   `tfsdk:"cpu"`
-	Memory            types.String   `tfsdk:"memory"`
-	Username          types.String   `tfsdk:"username"`
-	PasswordWO        types.String   `tfsdk:"password_wo"`
-	PasswordWOVersion types.Int64    `tfsdk:"password_wo_version"`
-	Expose            types.Bool     `tfsdk:"expose"`
-	Allowlist         types.List     `tfsdk:"allowlist"`
-	BackupSchedule    types.String   `tfsdk:"backup_schedule"`
-	BackupKeep        types.Int64    `tfsdk:"backup_keep"`
-	Ready             types.Bool     `tfsdk:"ready"`
-	Endpoints         types.List     `tfsdk:"endpoints"`
+	Timeouts          timeouts.Value      `tfsdk:"timeouts"`
+	Name              types.String        `tfsdk:"name"`
+	Engine            types.String        `tfsdk:"engine"`
+	Version           types.String        `tfsdk:"version"`
+	DiskGi            types.Int64         `tfsdk:"disk_gi"`
+	Instances         types.Int64         `tfsdk:"instances"`
+	CPU               types.String        `tfsdk:"cpu"`
+	Memory            types.String        `tfsdk:"memory"`
+	Username          types.String        `tfsdk:"username"`
+	PasswordWO        types.String        `tfsdk:"password_wo"`
+	PasswordWOVersion types.Int64         `tfsdk:"password_wo_version"`
+	Expose            types.Bool          `tfsdk:"expose"`
+	Allowlist         types.List          `tfsdk:"allowlist"`
+	BackupSchedule    types.String        `tfsdk:"backup_schedule"`
+	BackupKeep        types.Int64         `tfsdk:"backup_keep"`
+	Backup            *storageBackupModel `tfsdk:"backup"`
+	Ready             types.Bool          `tfsdk:"ready"`
+	Endpoints         types.List          `tfsdk:"endpoints"`
+}
+
+// storageBackupModel is the backup block: on when present.
+type storageBackupModel struct {
+	Mode     types.String `tfsdk:"mode"`
+	KeepDays types.Int64  `tfsdk:"keep_days"`
+}
+
+// The platform's backup defaults: a backup block without them reads back as
+// written, so an unset mode or keep_days never shows as a change.
+const (
+	defaultBackupMode     = "daily"
+	defaultBackupKeepDays = 10
+)
+
+// storageBackup is the backup the database is written with. The platform
+// keeps backups only with enabled: true — a schedule alone once meant none
+// were taken — so every form that asks for backups says so. On an update
+// with no backup configured it says they are off, since the platform keeps
+// an explicit off and the write replaces the database's settings.
+func storageBackup(m storageModel, update bool) map[string]any {
+	switch {
+	case m.Backup != nil:
+		b := map[string]any{"enabled": true}
+		if v := m.Backup.Mode.ValueString(); v != "" {
+			b["mode"] = v
+		}
+		if !m.Backup.KeepDays.IsNull() && !m.Backup.KeepDays.IsUnknown() {
+			b["keepDays"] = m.Backup.KeepDays.ValueInt64()
+		}
+		return b
+	case m.BackupSchedule.ValueString() != "":
+		b := map[string]any{"enabled": true, "mode": defaultBackupMode}
+		if !m.BackupKeep.IsNull() && !m.BackupKeep.IsUnknown() {
+			b["keepDays"] = m.BackupKeep.ValueInt64()
+		}
+		return b
+	case update:
+		return map[string]any{"enabled": false}
+	}
+	return nil
 }
 
 // storageSpec builds the kind block (also the flat create body without id).
-func storageSpec(ctx context.Context, m storageModel, password string) map[string]any {
+func storageSpec(ctx context.Context, m storageModel, password string, update bool) map[string]any {
 	spec := map[string]any{"engine": m.Engine.ValueString()}
 	if v := m.Version.ValueString(); v != "" {
 		spec["version"] = v
 	}
-	if !m.DiskGi.IsNull() {
+	if !m.DiskGi.IsNull() && !m.DiskGi.IsUnknown() {
 		spec["storageSize"] = fmt.Sprintf("%dGi", m.DiskGi.ValueInt64())
 	}
 	if !m.Instances.IsNull() {
@@ -203,17 +286,130 @@ func storageSpec(ctx context.Context, m storageModel, password string) map[strin
 	if len(network) > 0 {
 		spec["network"] = network
 	}
-	backup := map[string]any{}
-	if v := m.BackupSchedule.ValueString(); v != "" {
-		backup["schedule"] = v
-	}
-	if !m.BackupKeep.IsNull() {
-		backup["maxBackups"] = m.BackupKeep.ValueInt64()
-	}
-	if len(backup) > 0 {
-		spec["backup"] = backup
+	if b := storageBackup(m, update); b != nil {
+		spec["backup"] = b
 	}
 	return spec
+}
+
+// readStorageBackup reads the database's backups back in the form the
+// configuration uses: the deprecated attributes when it uses them, the block
+// otherwise. Backups turned off (or on) elsewhere show as a change.
+func readStorageBackup(state *storageModel, raw any) {
+	b, _ := raw.(map[string]any)
+	on, _ := b["enabled"].(bool)
+	mode, _ := b["mode"].(string)
+	var keep int64
+	if v, ok := b["keepDays"].(float64); ok {
+		keep = int64(v)
+	} else if v, ok := b["maxBackups"].(float64); ok {
+		keep = int64(v)
+	}
+	if !state.BackupSchedule.IsNull() {
+		if !on {
+			state.BackupSchedule, state.BackupKeep = types.StringNull(), types.Int64Null()
+			return
+		}
+		if keep > 0 && !(state.BackupKeep.IsNull() && keep == defaultBackupKeepDays) {
+			state.BackupKeep = types.Int64Value(keep)
+		}
+		return
+	}
+	if !on {
+		state.Backup = nil
+		return
+	}
+	prev := state.Backup
+	if prev == nil {
+		prev = &storageBackupModel{Mode: types.StringNull(), KeepDays: types.Int64Null()}
+	}
+	next := &storageBackupModel{Mode: prev.Mode, KeepDays: prev.KeepDays}
+	if mode != "" && !(prev.Mode.IsNull() && mode == defaultBackupMode) {
+		next.Mode = types.StringValue(mode)
+	}
+	if keep > 0 && !(prev.KeepDays.IsNull() && keep == defaultBackupKeepDays) {
+		next.KeepDays = types.Int64Value(keep)
+	}
+	state.Backup = next
+}
+
+// readStorageSizes fills the sizes the platform decided when the
+// configuration left them out, so the next write sends them back unchanged.
+func readStorageSizes(state *storageModel, sp map[string]any) {
+	state.DiskGi = types.Int64Null()
+	if v, ok := sp["storageSize"].(string); ok && v != "" {
+		var gi int64
+		fmt.Sscanf(v, "%dGi", &gi)
+		if gi > 0 {
+			state.DiskGi = types.Int64Value(gi)
+		}
+	}
+	state.CPU, state.Memory = types.StringNull(), types.StringNull()
+	if v, ok := sp["cpu"].(string); ok && v != "" {
+		state.CPU = types.StringValue(v)
+	}
+	if v, ok := sp["memory"].(string); ok && v != "" {
+		state.Memory = types.StringValue(v)
+	}
+}
+
+// fillStorageComputed reads the sizes back after a write.
+func fillStorageComputed(ctx context.Context, c *client.Client, m *storageModel, diags *diag.Diagnostics) {
+	ws, err := c.Workloads(ctx)
+	if err == nil {
+		if w := findWorkload(ws, m.Name.ValueString()); w != nil && w.Storage != nil {
+			readStorageSizes(m, w.Storage)
+			return
+		}
+	}
+	if m.DiskGi.IsUnknown() {
+		m.DiskGi = types.Int64Null()
+	}
+	if m.CPU.IsUnknown() {
+		m.CPU = types.StringNull()
+	}
+	if m.Memory.IsUnknown() {
+		m.Memory = types.StringNull()
+	}
+}
+
+func (r *storageResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg storageModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	for _, e := range storageConfigErrors(cfg) {
+		resp.Diagnostics.AddError(e[0], e[1])
+	}
+}
+
+// storageConfigErrors are the checks the platform makes, at plan time.
+func storageConfigErrors(m storageModel) [][2]string {
+	var errs [][2]string
+	legacy := !m.BackupSchedule.IsNull() || !m.BackupKeep.IsNull()
+	if m.Backup != nil && legacy {
+		errs = append(errs, [2]string{"Two ways to set backups",
+			"Use the backup block alone; backup_schedule and backup_keep are its deprecated form."})
+	}
+	if m.Backup == nil && m.BackupSchedule.IsNull() && !m.BackupKeep.IsNull() {
+		errs = append(errs, [2]string{"backup_keep without backup_schedule",
+			"backup_keep does nothing on its own. Use backup { keep_days = N }."})
+	}
+	if m.Engine.IsUnknown() || m.Engine.IsNull() {
+		return errs
+	}
+	if m.Engine.ValueString() == "redis" {
+		if m.Backup != nil || !m.BackupSchedule.IsNull() {
+			errs = append(errs, [2]string{"Backups are for Postgres only",
+				"Redis keeps its keys on disk across restarts, but has no backups. Remove the backup settings."})
+		}
+		if !m.Instances.IsUnknown() && m.Instances.ValueInt64() > 1 {
+			errs = append(errs, [2]string{"Redis runs as one instance",
+				"Three instances are for Postgres, where a copy takes over when the main one fails. Set instances = 1 or leave it out."})
+		}
+	}
+	return errs
 }
 
 // refreshStorageStatus fills the computed ready/endpoints attributes.
@@ -248,7 +444,7 @@ func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	body := storageSpec(ctx, plan, cfg.PasswordWO.ValueString())
+	body := storageSpec(ctx, plan, cfg.PasswordWO.ValueString(), false)
 	body["id"] = plan.Name.ValueString()
 	if err := r.data.Client.CreateWorkload(ctx, "storage", body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create database", err)
@@ -263,6 +459,7 @@ func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest
 		// fall through: record what exists so destroy/retry work
 	}
 	plan.PasswordWO = types.StringNull()
+	fillStorageComputed(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	refreshStorageStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -290,21 +487,9 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 	if v, ok := sp["version"].(string); ok && v != "" {
 		state.Version = types.StringValue(v)
 	}
-	if v, ok := sp["storageSize"].(string); ok && v != "" {
-		var gi int64
-		fmt.Sscanf(v, "%dGi", &gi)
-		if gi > 0 {
-			state.DiskGi = types.Int64Value(gi)
-		}
-	}
+	readStorageSizes(&state, sp)
 	if v, ok := sp["instances"].(float64); ok && v > 0 {
 		state.Instances = types.Int64Value(int64(v))
-	}
-	if v, ok := sp["cpu"].(string); ok && v != "" {
-		state.CPU = types.StringValue(v)
-	}
-	if v, ok := sp["memory"].(string); ok && v != "" {
-		state.Memory = types.StringValue(v)
 	}
 	if creds, ok := sp["credentials"].(map[string]any); ok {
 		if v, ok := creds["username"].(string); ok && v != "" {
@@ -325,14 +510,7 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 			state.Allowlist = types.ListValueMust(types.StringType, vals)
 		}
 	}
-	if backup, ok := sp["backup"].(map[string]any); ok {
-		if v, ok := backup["schedule"].(string); ok && v != "" {
-			state.BackupSchedule = types.StringValue(v)
-		}
-		if v, ok := backup["maxBackups"].(float64); ok && v > 0 {
-			state.BackupKeep = types.Int64Value(int64(v))
-		}
-	}
+	readStorageBackup(&state, sp["backup"])
 	refreshStorageStatus(ctx, r.data.Client, &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
@@ -352,7 +530,7 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 	w := client.Workload{
 		ID:      plan.Name.ValueString(),
 		Type:    "storage",
-		Storage: storageSpec(ctx, plan, password),
+		Storage: storageSpec(ctx, plan, password, true),
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update database", err)
@@ -366,6 +544,7 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("Database did not become ready after update", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
+	fillStorageComputed(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	refreshStorageStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }

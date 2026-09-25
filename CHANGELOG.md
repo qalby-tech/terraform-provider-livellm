@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Fixed** `livellm_storage` backups were never taken: `backup_schedule`
+  sent a schedule without turning backups on, so the database had none and
+  no error said so. It now turns them on.
+- **Added** `livellm_storage` `backup { mode, keep_days }`. `mode` is `daily`
+  (a full copy each night, the default), `continuous` (the nightly copy plus
+  every change, so the database can be restored to any minute) or `manual`
+  (nothing scheduled). `keep_days` is how many days backups are kept (10 by
+  default). With the block backups are on, without it off, and a plan shows
+  backups turned on or off in the console as a change.
+- **Deprecated** `backup_schedule` and `backup_keep`. They still work: any
+  schedule means daily backups, and `backup_keep` is the same number of days
+  as `keep_days` (it always was days, not a number of backups; its
+  description said otherwise). They can't be combined with `backup`.
+- **Added** plan-time checks on `livellm_storage`: `instances` is 1 or 3,
+  three instances and backups are Postgres only (Redis runs as one instance
+  and has no backups).
+- **Changed** `livellm_storage` `cpu`, `memory` and `disk_gi` read back the
+  sizes the platform gives a database when they are left out (1, 1Gi, 5 GiB),
+  and later changes send them back unchanged instead of dropping them.
+- **Added** `livellm_vm` `backup { schedule, keep }`: scheduled backups of the
+  disk, keeping the last `keep` (1..100 — a count, unlike a database's days).
+  A schedule set in the console now shows in the plan; before, the next apply
+  removed it without saying so.
 - **Added** the `livellm_browser_api` resource: one address that drives
   several browsers. Name them in `browsers`, or drive every browser in the
   workspace with `all_browsers = true`; `remote_browser` blocks add browsers

@@ -22,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
@@ -169,6 +170,24 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
+			"backup": schema.SingleNestedBlock{
+				Description: "Scheduled backups of the machine's disk. Without the block, none are scheduled " +
+					"(backups taken by hand are kept either way). A backup restores in place, with the machine stopped.",
+				Attributes: map[string]schema.Attribute{
+					// Both are needed whenever the block is there (ValidateConfig).
+					"schedule": schema.StringAttribute{
+						Optional: true,
+						Description: "When to back up: @hourly, @daily, @weekly, @monthly or a 5-field cron expression (UTC). " +
+							"Required inside a backup block.",
+					},
+					"keep": schema.Int64Attribute{
+						Optional: true,
+						Description: "How many scheduled backups are kept, 1..100: the newest ones. A count, unlike a " +
+							"database's keep_days. Required inside a backup block.",
+						Validators: []validator.Int64{int64validator.Between(1, 100)},
+					},
+				},
+			},
 			"port": schema.ListNestedBlock{
 				Description: "Exposed ports. HTTP ports get a public HTTPS hostname; tcp/udp ports get a raw address.",
 				NestedObject: schema.NestedBlockObject{
@@ -225,6 +244,7 @@ type vmResourceModel struct {
 	ExpiresAt         types.String   `tfsdk:"expires_at"`
 	AllowCIDRs        types.List     `tfsdk:"allow_cidrs"`
 	Port              types.List     `tfsdk:"port"`
+	Backup            *vmBackupModel `tfsdk:"backup"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
@@ -232,6 +252,68 @@ type vmResourceModel struct {
 	SSH               types.String   `tfsdk:"ssh"`
 	URL               types.String   `tfsdk:"url"`
 	Endpoints         types.List     `tfsdk:"endpoints"`
+}
+
+// vmBackupModel is the backup block: a schedule and how many to keep.
+type vmBackupModel struct {
+	Schedule types.String `tfsdk:"schedule"`
+	Keep     types.Int64  `tfsdk:"keep"`
+}
+
+func (r *vmResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var cfg vmResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &cfg)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	for _, e := range vmConfigErrors(cfg) {
+		resp.Diagnostics.AddAttributeError(path.Root("backup"), e[0], e[1])
+	}
+}
+
+// vmConfigErrors are the platform's checks on the backup block, at plan time.
+func vmConfigErrors(m vmResourceModel) [][2]string {
+	b := m.Backup
+	if b == nil {
+		return nil
+	}
+	var errs [][2]string
+	if b.Schedule.IsNull() || (!b.Schedule.IsUnknown() && strings.TrimSpace(b.Schedule.ValueString()) == "") {
+		errs = append(errs, [2]string{"Backup schedule missing",
+			"A backup block needs a schedule: @hourly, @daily, @weekly, @monthly or a 5-field cron expression."})
+	} else if !b.Schedule.IsUnknown() && !validBackupSchedule(b.Schedule.ValueString()) {
+		errs = append(errs, [2]string{"Backup schedule not understood",
+			fmt.Sprintf("%q isn't @hourly, @daily, @weekly, @monthly or a 5-field cron expression.", b.Schedule.ValueString())})
+	}
+	if b.Keep.IsNull() {
+		errs = append(errs, [2]string{"Backup keep missing", "A backup block needs keep: how many scheduled backups to keep, 1..100."})
+	}
+	return errs
+}
+
+// validBackupSchedule matches what the platform accepts: a macro or five
+// cron fields.
+func validBackupSchedule(s string) bool {
+	switch s {
+	case "@hourly", "@daily", "@weekly", "@monthly":
+		return true
+	}
+	return len(strings.Fields(s)) == 5
+}
+
+// readVMBackup reads the machine's backup schedule back; one set or removed
+// elsewhere shows as a change.
+func readVMBackup(raw any) *vmBackupModel {
+	b, _ := raw.(map[string]any)
+	sched, _ := b["schedule"].(string)
+	if sched == "" {
+		return nil
+	}
+	m := &vmBackupModel{Schedule: types.StringValue(sched), Keep: types.Int64Null()}
+	if v, ok := b["keep"].(float64); ok && v > 0 {
+		m.Keep = types.Int64Value(int64(v))
+	}
+	return m
 }
 
 func (m vmResourceModel) workloadType() string {
@@ -348,6 +430,9 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 			out = append(out, e)
 		}
 		spec["ports"] = out
+	}
+	if b := m.Backup; b != nil && b.Schedule.ValueString() != "" {
+		spec["backup"] = map[string]any{"schedule": b.Schedule.ValueString(), "keep": b.Keep.ValueInt64()}
 	}
 	strategy := m.PlacementStrategy.ValueString()
 	if strategy != "" && strategy != "auto" {
@@ -565,6 +650,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		}
 		state.AllowCIDRs = types.ListValueMust(types.StringType, vals)
 	}
+	state.Backup = readVMBackup(sp["backup"])
 	if pl, ok := sp["placement"].(map[string]any); ok {
 		if v, ok := pl["strategy"].(string); ok && v != "" {
 			state.PlacementStrategy = types.StringValue(v)
