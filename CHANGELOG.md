@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
 - **Added** Windows to `livellm_vm`: `os = "windows"` with `windows_edition`
   (`desktop`, Windows 11 Pro, the default; or `server`, Windows Server 2025
