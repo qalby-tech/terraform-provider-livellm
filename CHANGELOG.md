@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (breaking)
+## 0.9.0 (breaking)
 
 - **Removed** `backup_schedule` and `backup_keep` from `livellm_storage`,
   deprecated since 0.8.0; the platform no longer takes a database backup
