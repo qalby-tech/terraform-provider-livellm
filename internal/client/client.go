@@ -123,14 +123,6 @@ type WorkloadStatus struct {
 	Message   string           `json:"message,omitempty"`
 	SSH       string           `json:"ssh,omitempty"`
 	Endpoints []EndpointStatus `json:"endpoints,omitempty"`
-	// Desktops is a Desktop App's desktops: how many should run, how many answer.
-	Desktops *DesktopCount `json:"desktops,omitempty"`
-}
-
-// DesktopCount is how many of a Desktop App's desktops should run and are ready.
-type DesktopCount struct {
-	Desired int `json:"desired"`
-	Ready   int `json:"ready"`
 }
 
 type TenantStatus struct {

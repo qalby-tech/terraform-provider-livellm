@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -24,9 +23,9 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// livellm_desktop_app — a Desktop App: Linux desktops in containers, each a
-// separate desktop (0, 1, …), that start in seconds. An agent works one
-// through the computer tool; a person watches it in the console.
+// livellm_desktop_app — a Desktop App: one Linux desktop in a container that
+// starts in seconds. An agent works it through the computer tool; a person
+// watches it in the console.
 type desktopAppResource struct {
 	data *providerData
 }
@@ -43,8 +42,8 @@ var resolutionRe = regexp.MustCompile(`^[0-9]{3,4}x[0-9]{3,4}$`)
 
 func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A Desktop App: Linux desktops in containers that start in seconds, numbered from 0. " +
-			"Reach one with connect's view or computer tool and its desktop number.",
+		Description: "A Desktop App: one Linux desktop in a container that starts in seconds. " +
+			"Reach it with connect's view or computer tool; make one for each desktop you need.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:    true,
@@ -53,13 +52,6 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"replicas": schema.Int64Attribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(1),
-				Description: "How many desktops, 1 to 20 (default 1).",
-				Validators:  []validator.Int64{int64validator.Between(1, 20)},
-			},
 			"image": schema.StringAttribute{
 				Optional: true,
 				Description: "A desktop image. Leave it out for the platform's (ghcr.io/qalby-tech/livellm-desktop:xfce); " +
@@ -67,11 +59,11 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 			},
 			"cpu": schema.StringAttribute{
 				Optional:    true,
-				Description: "CPU for each desktop, e.g. \"2\" (the default).",
+				Description: "CPU, e.g. \"2\" (the default).",
 			},
 			"memory": schema.StringAttribute{
 				Optional:    true,
-				Description: "Memory for each desktop, e.g. \"4Gi\" (the default).",
+				Description: "Memory, e.g. \"4Gi\" (the default).",
 			},
 			"resolution": schema.StringAttribute{
 				Optional:    true,
@@ -83,15 +75,15 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(false),
-				Description: "Give each desktop its own home folder that survives restarts. By default every desktop " +
-					"starts clean. Changing it replaces the app.",
+				Description: "Give the desktop a home folder that survives restarts. By default it starts clean " +
+					"every time. Changing it replaces the app.",
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.RequiresReplace(),
 				},
 			},
 			"storage_gi": schema.Int64Attribute{
 				Optional: true,
-				Description: "With keep_files: each desktop's home folder in GiB (10 when left out). Changing it " +
+				Description: "With keep_files: the home folder in GiB (10 when left out). Changing it " +
 					"replaces the app.",
 				Validators: []validator.Int64{int64validator.AtLeast(1)},
 				PlanModifiers: []planmodifier.Int64{
@@ -102,10 +94,9 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
-				Description: "Stop every desktop without deleting the app. Home folders are kept (keep_files) and only they are billed.",
+				Description: "Stop the desktop without deleting the app. The home folder is kept (keep_files) and only it is billed.",
 			},
-			"ready":          schema.BoolAttribute{Computed: true, Description: "Whether every desktop is up (false while stopped)."},
-			"desktops_ready": schema.Int64Attribute{Computed: true, Description: "How many desktops answer right now."},
+			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the desktop is up (false while stopped)."},
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
@@ -126,18 +117,16 @@ func (r *desktopAppResource) Configure(_ context.Context, req resource.Configure
 }
 
 type desktopAppModel struct {
-	Name          types.String   `tfsdk:"name"`
-	Replicas      types.Int64    `tfsdk:"replicas"`
-	Image         types.String   `tfsdk:"image"`
-	CPU           types.String   `tfsdk:"cpu"`
-	Memory        types.String   `tfsdk:"memory"`
-	Resolution    types.String   `tfsdk:"resolution"`
-	KeepFiles     types.Bool     `tfsdk:"keep_files"`
-	StorageGi     types.Int64    `tfsdk:"storage_gi"`
-	Stopped       types.Bool     `tfsdk:"stopped"`
-	Ready         types.Bool     `tfsdk:"ready"`
-	DesktopsReady types.Int64    `tfsdk:"desktops_ready"`
-	Timeouts      timeouts.Value `tfsdk:"timeouts"`
+	Name       types.String   `tfsdk:"name"`
+	Image      types.String   `tfsdk:"image"`
+	CPU        types.String   `tfsdk:"cpu"`
+	Memory     types.String   `tfsdk:"memory"`
+	Resolution types.String   `tfsdk:"resolution"`
+	KeepFiles  types.Bool     `tfsdk:"keep_files"`
+	StorageGi  types.Int64    `tfsdk:"storage_gi"`
+	Stopped    types.Bool     `tfsdk:"stopped"`
+	Ready      types.Bool     `tfsdk:"ready"`
+	Timeouts   timeouts.Value `tfsdk:"timeouts"`
 }
 
 func (r *desktopAppResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -148,7 +137,7 @@ func (r *desktopAppResource) ValidateConfig(ctx context.Context, req resource.Va
 	}
 	if !cfg.StorageGi.IsNull() && !cfg.KeepFiles.IsUnknown() && !cfg.KeepFiles.ValueBool() {
 		resp.Diagnostics.AddAttributeError(path.Root("storage_gi"), "storage_gi needs keep_files",
-			"Desktops keep a home folder only with keep_files = true; without it every desktop starts clean and has none.")
+			"A Desktop App keeps a home folder only with keep_files = true; without it the desktop starts clean and has none.")
 	}
 }
 
@@ -156,9 +145,6 @@ func (r *desktopAppResource) ValidateConfig(ctx context.Context, req resource.Va
 // default.
 func desktopSpec(m desktopAppModel) map[string]any {
 	spec := map[string]any{}
-	if !m.Replicas.IsNull() && !m.Replicas.IsUnknown() {
-		spec["replicas"] = m.Replicas.ValueInt64()
-	}
 	for key, v := range map[string]types.String{"image": m.Image, "cpu": m.CPU, "memory": m.Memory, "resolution": m.Resolution} {
 		if s := v.ValueString(); s != "" {
 			spec[key] = s
@@ -178,10 +164,6 @@ func desktopSpec(m desktopAppModel) map[string]any {
 func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 	d := w.Desktop
 	m.Stopped = types.BoolValue(w.Stopped)
-	m.Replicas = types.Int64Value(1)
-	if v, ok := d["replicas"].(float64); ok && v >= 1 {
-		m.Replicas = types.Int64Value(int64(v))
-	}
 	str := func(key string) types.String {
 		if s, _ := d[key].(string); s != "" {
 			return types.StringValue(s)
@@ -204,11 +186,6 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 func refreshDesktopStatus(ctx context.Context, c *client.Client, m *desktopAppModel) {
 	st, _ := statusOf(ctx, c, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
-	ready := int64(0)
-	if st != nil && st.Desktops != nil {
-		ready = int64(st.Desktops.Ready)
-	}
-	m.DesktopsReady = types.Int64Value(ready)
 }
 
 func (r *desktopAppResource) wait(ctx context.Context, m desktopAppModel) error {
@@ -219,27 +196,7 @@ func (r *desktopAppResource) wait(ctx context.Context, m desktopAppModel) error 
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
-	if err := waitReady(waitCtx, r.data.Client, m.Name.ValueString(), m.Stopped.ValueBool()); err != nil || m.Stopped.ValueBool() {
-		return err
-	}
-	// A Desktop App already running is ready before a desktop just added
-	// answers: wait for every one.
-	want := int(m.Replicas.ValueInt64())
-	for {
-		st, err := statusOf(waitCtx, r.data.Client, m.Name.ValueString())
-		if err == nil && st != nil && st.Desktops != nil && st.Desktops.Ready >= want {
-			return nil
-		}
-		select {
-		case <-waitCtx.Done():
-			got := 0
-			if st != nil && st.Desktops != nil {
-				got = st.Desktops.Ready
-			}
-			return fmt.Errorf("timed out waiting for %d desktops of %q (%d ready)", want, m.Name.ValueString(), got)
-		case <-time.After(5 * time.Second):
-		}
-	}
+	return waitReady(waitCtx, r.data.Client, m.Name.ValueString(), m.Stopped.ValueBool())
 }
 
 func (r *desktopAppResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

@@ -13,11 +13,11 @@ import (
 // only with keep_files.
 func TestDesktopSpec(t *testing.T) {
 	m := desktopAppModel{
-		Replicas: types.Int64Value(3), CPU: types.StringValue("2"), Memory: types.StringValue("4Gi"),
+		CPU: types.StringValue("2"), Memory: types.StringValue("4Gi"),
 		Image: types.StringNull(), Resolution: types.StringValue("1920x1080"),
 		KeepFiles: types.BoolValue(true), StorageGi: types.Int64Value(20),
 	}
-	want := map[string]any{"replicas": int64(3), "cpu": "2", "memory": "4Gi", "resolution": "1920x1080",
+	want := map[string]any{"cpu": "2", "memory": "4Gi", "resolution": "1920x1080",
 		"keepFiles": true, "storageSize": "20Gi"}
 	if got := desktopSpec(m); !reflect.DeepEqual(got, want) {
 		t.Errorf("spec %v, want %v", got, want)
@@ -29,18 +29,19 @@ func TestDesktopSpec(t *testing.T) {
 }
 
 // Reading back what the platform holds: a change made in the console shows
-// in the plan, and an import is complete.
+// in the plan, and an import is complete. A Desktop App stored when it could
+// run several still carries their count; it reads as the one desktop.
 func TestReadDesktopSpec(t *testing.T) {
 	var m desktopAppModel
 	readDesktopSpec(&m, &client.Workload{ID: "desks", Type: "desktop", Stopped: true, Desktop: map[string]any{
 		"replicas": float64(2), "memory": "8Gi", "keepFiles": true, "storageSize": "15Gi",
 	}})
-	if m.Replicas.ValueInt64() != 2 || m.Memory.ValueString() != "8Gi" || !m.CPU.IsNull() || !m.Image.IsNull() ||
+	if m.Memory.ValueString() != "8Gi" || !m.CPU.IsNull() || !m.Image.IsNull() ||
 		!m.KeepFiles.ValueBool() || m.StorageGi.ValueInt64() != 15 || !m.Stopped.ValueBool() {
 		t.Errorf("read %+v", m)
 	}
 	readDesktopSpec(&m, &client.Workload{ID: "desks", Type: "desktop", Desktop: map[string]any{}})
-	if m.Replicas.ValueInt64() != 1 || m.KeepFiles.ValueBool() || !m.StorageGi.IsNull() || m.Stopped.ValueBool() {
+	if m.KeepFiles.ValueBool() || !m.StorageGi.IsNull() || m.Stopped.ValueBool() {
 		t.Errorf("defaults read %+v", m)
 	}
 }

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Removed (breaking)** `replicas` and `desktops_ready` from
+  `livellm_desktop_app`: a Desktop App is one desktop. Make one resource for
+  each desktop (`for_each` over their names); `ready` says whether it is up.
+  A state written by 0.9.0 reads as before, without the two attributes; a
+  configuration that still sets `replicas` fails to plan until the line is
+  removed.
 - **Fixed** `livellm_storage` without `username`: the platform reports its
   default login name, `app`, and every later plan replaced the database. A
   `username` left out now plans as the name the database has — for a state

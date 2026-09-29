@@ -51,7 +51,7 @@ configuration; keys are secrets.
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
 | [`livellm_browser`](resources/browser.md) | Headless Chromium with a live view and a CDP endpoint |
 | [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers |
-| [`livellm_desktop_app`](resources/desktop_app.md) | Linux desktops in containers that start in seconds |
+| [`livellm_desktop_app`](resources/desktop_app.md) | A Linux desktop in a container that starts in seconds |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md).
