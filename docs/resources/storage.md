@@ -92,7 +92,7 @@ resource "livellm_storage" "cache" {
 - `instances` (Number) `1`, or `3` for Postgres: two standby copies, one of which takes over if the main one fails. Redis runs as one instance; `3` is refused at plan time.
 - `cpu` (String) CPU, e.g. `1` or `500m`; `1` when unset.
 - `memory` (String) Memory, e.g. `1Gi`; `1Gi` when unset.
-- `username` (String) Application username (Postgres). Changing it replaces the database.
+- `username` (String) Application username (Postgres). Left out, the platform names it `app`, and leaving it out later keeps the name the database has. Changing it replaces the database.
 - `expose` (Boolean) Expose the database externally over TLS.
 - `allowlist` (List of String) Client CIDRs/IPs allowed when exposed. Empty = no IP restriction.
 - `backup` (Block) Backups, Postgres only. With the block backups are on; without it they are off (a plan shows backups turned on or off elsewhere as a change).

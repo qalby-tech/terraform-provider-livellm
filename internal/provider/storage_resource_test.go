@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -193,24 +195,62 @@ func TestKeepSizeWhenUnset(t *testing.T) {
 	}
 }
 
-// A database configured without a username reads back without one while the
-// platform reports its default, so the next plan doesn't replace it.
-func TestReadUsername(t *testing.T) {
-	null := types.StringNull()
+// Left out of the configuration, the username plans as the name the
+// database has, so a plan never replaces it for a name no one changed: the
+// platform's own "app" an older provider wrote into state, nothing for a
+// database saved without one, the name an import read. A name the
+// configuration changes still replaces it, and a new database leaves it to
+// the platform.
+func TestUsernamePlan(t *testing.T) {
+	ctx := context.Background()
+	var sr resource.SchemaResponse
+	(&storageResource{}).Schema(ctx, resource.SchemaRequest{}, &sr)
+	mods := sr.Schema.Attributes["username"].(schema.StringAttribute).PlanModifiers
+	obj := tftypes.Object{AttributeTypes: map[string]tftypes.Type{}}
+	saved := tfsdk.State{Raw: tftypes.NewValue(obj, map[string]tftypes.Value{})}
+	creating := tfsdk.State{Raw: tftypes.NewValue(obj, nil)}
+	planned := tfsdk.Plan{Raw: tftypes.NewValue(obj, map[string]tftypes.Value{})}
+	null, app := types.StringNull(), types.StringValue("app")
+
 	cases := []struct {
-		name string
-		prev types.String
-		api  string
-		want types.String
+		name          string
+		state         tfsdk.State
+		config, prior types.String
+		want          types.String
+		replace       bool
 	}{
-		{"left out, the platform's default", null, "app", null},
-		{"left out, another name (set elsewhere, or imported)", null, "nextcloud", types.StringValue("nextcloud")},
-		{"configured as the default", types.StringValue("app"), "app", types.StringValue("app")},
-		{"configured, changed elsewhere", types.StringValue("shop"), "app", types.StringValue("app")},
+		{"left out, state from an older provider", saved, null, app, app, false},
+		{"left out, saved without one", saved, null, null, null, false},
+		{"left out, another name read back", saved, null, types.StringValue("nextcloud"), types.StringValue("nextcloud"), false},
+		{"imported, configured as the platform's", saved, app, app, app, false},
+		{"configured anew", saved, types.StringValue("shop"), app, types.StringValue("shop"), true},
+		{"a new database", creating, null, null, types.StringUnknown(), false},
 	}
 	for _, c := range cases {
-		if got := readUsername(c.prev, c.api); !got.Equal(c.want) {
-			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		plan := c.config
+		if plan.IsNull() {
+			plan = types.StringUnknown() // what the framework plans for a computed value left out
 		}
+		replace := false
+		for _, m := range mods {
+			req := planmodifier.StringRequest{State: c.state, Plan: planned, ConfigValue: c.config, StateValue: c.prior, PlanValue: plan}
+			resp := &planmodifier.StringResponse{PlanValue: plan}
+			m.PlanModifyString(ctx, req, resp)
+			plan, replace = resp.PlanValue, replace || resp.RequiresReplace
+		}
+		if !plan.Equal(c.want) || replace != c.replace {
+			t.Errorf("%s: planned %v (replace %v), want %v (replace %v)", c.name, plan, replace, c.want, c.replace)
+		}
+	}
+}
+
+// Read always reads the name back; after a create that left it out, state
+// holds the platform's name.
+func TestStorageUsernameReadBack(t *testing.T) {
+	if got := storageUsername(map[string]any{"credentials": map[string]any{"username": "app"}}); got != "app" {
+		t.Errorf("read back %q", got)
+	}
+	if got := storageUsername(map[string]any{"engine": "redis"}); got != "" {
+		t.Errorf("no login read back as %q", got)
 	}
 }

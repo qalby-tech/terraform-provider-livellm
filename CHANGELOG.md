@@ -4,8 +4,10 @@
 
 - **Fixed** `livellm_storage` without `username`: the platform reports its
   default login name, `app`, and every later plan replaced the database. A
-  configuration that leaves `username` out now reads as having none while the
-  platform reports `app`; any other name still shows as a change.
+  `username` left out now plans as the name the database has — for a state
+  written by an earlier version too, and after an import — and state reads the
+  name back (a new database shows `app`). Only changing the name in the
+  configuration replaces the database.
 - **Fixed** a delete that the platform finished but answered too late for the
   connection (it clears away what belonged to the resource first): the
   provider looks at the workspace, and a resource gone from it is deleted

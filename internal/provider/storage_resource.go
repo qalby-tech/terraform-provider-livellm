@@ -87,9 +87,15 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"username": schema.StringAttribute{
-				Optional:    true,
-				Description: "Application username (Postgres). Set once at create.",
+				Optional: true,
+				Computed: true,
+				Description: "Application username (Postgres). Set once at create; left out, the platform names it " +
+					"`app`. Leaving it out later keeps the name the database has.",
+				// Left out, the name the database has is planned, so it is
+				// never replaced for a name no one asked to change (the
+				// platform's own `app`, or the one an import read).
 				PlanModifiers: []planmodifier.String{
+					keepSizeWhenUnset{},
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -322,19 +328,12 @@ func (keepSizeWhenUnset) PlanModifyString(_ context.Context, req planmodifier.St
 	resp.PlanValue = req.StateValue
 }
 
-// defaultUsername is the login the platform gives a database whose
-// configuration names none.
-const defaultUsername = "app"
-
-// readUsername is the login name as state keeps it: a configuration that
-// left username out stays without one while the platform reports its own
-// default (else every plan would replace the database), and any other name
-// the platform reports is read back.
-func readUsername(prev types.String, api string) types.String {
-	if prev.IsNull() && api == defaultUsername {
-		return prev
-	}
-	return types.StringValue(api)
+// storageUsername is the login name the platform reports for a database
+// ("" when it has none).
+func storageUsername(sp map[string]any) string {
+	creds, _ := sp["credentials"].(map[string]any)
+	v, _ := creds["username"].(string)
+	return v
 }
 
 // readStorageSizes fills the sizes the platform decided when the
@@ -363,8 +362,15 @@ func fillStorageComputed(ctx context.Context, c *client.Client, m *storageModel,
 	if err == nil {
 		if w := findWorkload(ws, m.Name.ValueString()); w != nil && w.Storage != nil {
 			readStorageSizes(m, w.Storage)
-			return
+			// A new database left without a username gets the platform's;
+			// a planned one (known) must come back as planned.
+			if v := storageUsername(w.Storage); m.Username.IsUnknown() && v != "" {
+				m.Username = types.StringValue(v)
+			}
 		}
+	}
+	if m.Username.IsUnknown() {
+		m.Username = types.StringNull()
 	}
 	if m.DiskGi.IsUnknown() {
 		m.DiskGi = types.Int64Null()
@@ -486,10 +492,8 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 	if v, ok := sp["instances"].(float64); ok && v > 0 {
 		state.Instances = types.Int64Value(int64(v))
 	}
-	if creds, ok := sp["credentials"].(map[string]any); ok {
-		if v, ok := creds["username"].(string); ok && v != "" {
-			state.Username = readUsername(state.Username, v)
-		}
+	if v := storageUsername(sp); v != "" {
+		state.Username = types.StringValue(v)
 	}
 	if network, ok := sp["network"].(map[string]any); ok {
 		if v, ok := network["expose"].(bool); ok {
