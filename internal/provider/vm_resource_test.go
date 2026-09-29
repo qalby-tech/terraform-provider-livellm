@@ -190,7 +190,6 @@ func TestWindowsConfigErrors(t *testing.T) {
 		"disk_gi":  func(m *vmResourceModel) { m.DiskGi = types.Int64Value(40) },
 		"username": func(m *vmResourceModel) { m.Username = types.StringValue("administrator") },
 		"desktop":  func(m *vmResourceModel) { m.Desktop = types.BoolValue(true) },
-		"ssh_keys": func(m *vmResourceModel) { m.SSHKeys = keyList([]string{testKeyA}) },
 		"windows_edition": func(m *vmResourceModel) {
 			m.OS = types.StringValue("ubuntu")
 			m.WindowsEdition = types.StringValue("server")
@@ -208,5 +207,11 @@ func TestWindowsConfigErrors(t *testing.T) {
 	ok.DiskGi = types.Int64Value(64)
 	if errs := windowsConfigErrors(ok); len(errs) != 0 {
 		t.Errorf("64 GiB is enough: %v", errs)
+	}
+	// Windows takes SSH keys like Linux: they open its SSH for username.
+	keyed := base()
+	keyed.SSHKeys = keyList([]string{testKeyA})
+	if errs := windowsConfigErrors(keyed); len(errs) != 0 {
+		t.Errorf("a Windows machine with SSH keys: %v", errs)
 	}
 }

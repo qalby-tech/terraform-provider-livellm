@@ -72,9 +72,9 @@ resource "livellm_vm" "worker" {
 
 Windows 11 (`windows_edition = "server"` for Windows Server 2025, Server Core:
 a command line and no desktop). Windows installs itself on first start, which
-takes 15 to 35 minutes; open it from the console's screen or with its Remote
-Desktop file. It needs a disk of at least 64 GiB, gets 64 when `disk_gi` is
-left out, and takes no `ssh_keys`:
+takes 15 to 35 minutes; open it from the console's screen, with its Remote
+Desktop file, or over SSH (PowerShell) with `ssh_keys`, like a Linux machine.
+It needs a disk of at least 64 GiB and gets 64 when `disk_gi` is left out:
 
 ```terraform
 resource "livellm_vm" "win" {
@@ -87,6 +87,7 @@ resource "livellm_vm" "win" {
   username            = "admin" # not "Administrator": that name is Windows' own
   password_wo         = var.win_password
   password_wo_version = 1
+  ssh_keys            = [file("~/.ssh/id_ed25519.pub")] # ssh -p PORT admin@HOST
 
   timeouts {
     create = "45m" # the default for Windows
@@ -152,7 +153,7 @@ resource "livellm_vm" "build" {
 ### Required
 
 - `name` (String) Workload id. Changing it replaces the VM.
-- `username` (String) The login's username: SSH on Linux, the administrator on Windows (not `Administrator`, which is Windows' own). Changing it replaces the VM.
+- `username` (String) The login's username, for SSH too; on Windows it is an administrator (not `Administrator`, which is Windows' own). Changing it replaces the VM.
 - `password_wo` (String, Sensitive, Write-only) The login's password, at least 8 characters — not stored in state.
 - `password_wo_version` (Number) Rotation trigger for `password_wo`.
 
@@ -164,7 +165,7 @@ resource "livellm_vm" "build" {
 - `cpus` (Number) vCPU count.
 - `memory_gi` (Number) Memory in GiB.
 - `disk_gi` (Number) Root disk in GiB. Windows needs at least 64.
-- `ssh_keys` (List of String) Linux only. SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
+- `ssh_keys` (List of String) SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. On Windows they open SSH, with PowerShell as its shell. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
 - `allow_cidrs` (List of String) Source CIDRs allowed to reach SSH and raw ports. Omit for workspace-internal only; `0.0.0.0/0` for public.

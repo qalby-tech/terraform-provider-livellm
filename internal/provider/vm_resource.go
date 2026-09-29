@@ -102,7 +102,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			},
 			"username": schema.StringAttribute{
 				Required: true,
-				Description: "The login's username (SSH on Linux, the administrator on Windows, which can't be \"Administrator\"). " +
+				Description: "The login's username, for SSH too; on Windows it is an administrator and can't be \"Administrator\". " +
 					"Changing it replaces the VM (the login is baked at first boot).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -125,7 +125,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Description: "SSH public keys for this machine alone, one .pub line each. They are installed for " +
 					"username next to the workspace's own keys, and a change reaches a running machine within a " +
 					"minute or two. Leave it out to keep whatever the machine has; the platform keeps a machine's " +
-					"last key, so replace a key rather than emptying the list. Linux only.",
+					"last key, so replace a key rather than emptying the list. On Windows they open SSH (PowerShell) for username.",
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.UseStateForUnknown(),
 				},
@@ -316,10 +316,6 @@ func windowsConfigErrors(m vmResourceModel) [][3]string {
 	if strings.EqualFold(m.Username.ValueString(), "Administrator") {
 		errs = append(errs, [3]string{"username", "Username taken by Windows",
 			"\"Administrator\" is Windows' own built-in account. Pick another name; it becomes an administrator."})
-	}
-	if !m.SSHKeys.IsNull() && !m.SSHKeys.IsUnknown() {
-		errs = append(errs, [3]string{"ssh_keys", "SSH keys are for Linux machines",
-			"A Windows machine is opened with its username and password, in the console or with Remote Desktop. Leave ssh_keys out."})
 	}
 	return errs
 }

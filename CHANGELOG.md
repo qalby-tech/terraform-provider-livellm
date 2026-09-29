@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `livellm_vm`: a Windows machine takes `ssh_keys` like a Linux one. The keys
+  open its SSH (PowerShell) for `username`, next to the workspace's own; the
+  plan-time refusal is gone.
+
 ## 0.9.0 (breaking)
 
 - **Removed** `backup_schedule` and `backup_keep` from `livellm_storage`,
