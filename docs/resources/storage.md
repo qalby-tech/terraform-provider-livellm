@@ -8,7 +8,10 @@ description: |-
 
 Creates a managed database — Postgres or Redis. Terraform waits until it is
 healthy, then reports its connection endpoints. The password is a write-only
-argument.
+argument. An app uses it through a `database` block on
+[`livellm_container_app`](container_app.md): the app gets the address, the
+login and the password as environment variables, read from the database's own
+login, so the password never has to be passed to the app.
 
 ## Example Usage
 
