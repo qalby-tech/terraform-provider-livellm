@@ -46,7 +46,7 @@ func (r *vmResource) Metadata(_ context.Context, req resource.MetadataRequest, r
 func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server. " +
-			"The password is write-only and a Linux machine can carry SSH keys of its own; exposed ports get public HTTPS " +
+			"The password is write-only and a machine, Linux or Windows, can carry SSH keys of its own; exposed ports get public HTTPS " +
 			"hostnames; stopped keeps the disk while halting the machine, and stop_after has the platform do that for you.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
