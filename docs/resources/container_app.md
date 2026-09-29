@@ -12,7 +12,10 @@ and runs it. Rebuild whenever you like from the dashboard or the API (the
 platform never polls your repo). Terraform waits until the app is serving, then
 reports the public address of every exposed port: an HTTPS URL for an HTTP
 port, a `host:port` for a raw TCP or UDP port. Volumes keep the app's data
-across restarts, and `stopped` keeps them while the app runs nothing.
+across restarts, and `stopped` keeps them while the app runs nothing. A
+`database` block links a managed database: its connection details reach the
+app as environment variables, the password without ever passing through
+Terraform.
 
 ## Example Usage
 
@@ -38,8 +41,69 @@ output "web_url" {
 }
 ```
 
-Built from a Git repo, wired to a managed database, with a secret value that
-the platform stores write-only:
+An app linked to its managed databases. Each `database` block names a
+database and which of its details go into which variables; the password and
+the URL are read from the database's own login when the app starts, so they
+are never in the app's settings or in state. The app starts once its
+databases accept connections.
+
+```terraform
+resource "livellm_storage" "db" {
+  name                = "cloud-db"
+  engine              = "postgres"
+  disk_gi             = 10
+  password_wo         = var.db_password
+  password_wo_version = 1
+}
+
+resource "livellm_storage" "cache" {
+  name                = "cloud-cache"
+  engine              = "redis"
+  disk_gi             = 1
+  password_wo         = var.cache_password
+  password_wo_version = 1
+}
+
+resource "livellm_container_app" "cloud" {
+  name   = "cloud"
+  image  = "nextcloud:stable-apache"
+  cpu    = "1"
+  memory = "2Gi"
+
+  database {
+    name = livellm_storage.db.name
+    env = {
+      POSTGRES_HOST     = "host"
+      POSTGRES_DB       = "database"
+      POSTGRES_USER     = "username"
+      POSTGRES_PASSWORD = "password"
+    }
+  }
+
+  database {
+    name = livellm_storage.cache.name
+    env = {
+      REDIS_HOST          = "host"
+      REDIS_HOST_PORT     = "port"
+      REDIS_HOST_PASSWORD = "password"
+    }
+  }
+
+  port {
+    name = "http"
+    port = 80
+  }
+
+  volume {
+    name       = "html"
+    size_gi    = 20
+    mount_path = "/var/www/html"
+  }
+}
+```
+
+Built from a Git repo, with a secret value that the platform stores
+write-only:
 
 ```terraform
 resource "livellm_container_app" "api" {
@@ -55,12 +119,8 @@ resource "livellm_container_app" "api" {
     token = var.github_token       # only for private repos
   }
 
-  env = {
-    DB_HOST = one([for e in livellm_storage.db.endpoints : e.addr if e.name == "postgres"])
-  }
-
   secret_env = {
-    DB_PASSWORD = var.db_password
+    STRIPE_KEY = var.stripe_key
   }
 
   port {
@@ -216,6 +276,32 @@ resource "livellm_container_app" "grafana" {
   (an allow-list lifted in the console) shows in the plan. A password on an
   HTTP port is set in the console only; an apply writes the ports as
   configured, without it.
+- `database` (Block List, at most 8) A managed database of the workspace
+  this app uses:
+  - `name` (String, Required) The database's name, e.g. `livellm_storage.db.name` (which also has Terraform create the database first and delete it last).
+  - `env` (Map of String, Required) Environment variable name → the detail it carries:
+
+    | Detail | PostgreSQL | Redis |
+    |---|---|---|
+    | `host` | its private address | its private address |
+    | `port` | `5432` | `6379` |
+    | `database` | `app` | — |
+    | `username` | the login's name | — |
+    | `password` | the password | the password |
+    | `url` | `postgres://user:password@host:5432/app` | `redis://:password@host:6379` |
+
+    1 to 12 variables per block. A variable name is letters, digits and `_`,
+    not starting with a digit, and is used once in the app, across `env`,
+    `secret_env` and every `database` block; the plan checks all of it.
+
+  The password and `url` come from the database's stored login: nothing
+  secret is written to the app's settings or to state. A linked database is
+  waited for before the app starts (no `starts_after` needed), and can't be
+  deleted while an app links it. A database whose password was set before
+  links existed can't give `url` until its password is set once more: bump
+  `password_wo_version` on its `livellm_storage` (the apply says so).
+  Linked apps read a new password when they restart. Links are read back on
+  every refresh.
 - `volume` (Block List, at most 8) Disks that keep their data when the app
   restarts, is redeployed or is stopped:
   - `name` (String, Required) Lowercase letters, digits and hyphens, at most 15 characters. A new name is a new, empty volume.
@@ -239,7 +325,7 @@ terraform import livellm_container_app.web web
 ```
 
 Secret values, the repo token and the image password cannot be read back;
-set them in configuration after importing. An import reads the app's ports
-and volumes:
+set them in configuration after importing. An import reads the app's ports,
+database links and volumes:
 write each one as a `volume` block before the first apply, or the plan warns
 that it would be deleted.

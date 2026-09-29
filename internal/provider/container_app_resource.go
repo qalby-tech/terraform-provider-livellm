@@ -6,6 +6,7 @@ import (
 	"net"
 	pathpkg "path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -225,6 +226,29 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 					},
 				},
 			},
+			"database": schema.ListNestedBlock{
+				Description: "A database of the workspace this app uses (at most 8). Its connection details become the app's " +
+					"environment variables under the names in env. The password, and the url, which holds it, are read from " +
+					"the database's own stored login: they are never in the app's settings, in state or in an API answer. " +
+					"The app starts once each database accepts connections (no starts_after needed), and a database can't " +
+					"be deleted while an app links it.",
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						"name": schema.StringAttribute{
+							Required:    true,
+							Description: "The database's name, e.g. livellm_storage.db.name.",
+						},
+						"env": schema.MapAttribute{
+							Required:    true,
+							ElementType: types.StringType,
+							Description: "Environment variable name → the detail it carries: host, port, database, username, " +
+								"password or url (postgres://user:password@host:5432/app, redis://:password@host:6379). A Redis " +
+								"database gives host, port, url and password — no database or username. 1 to 12 variables; a name " +
+								"is used once in the app, across env, secret_env and every database block.",
+						},
+					},
+				},
+			},
 			"volume": schema.ListNestedBlock{
 				Description: "Disks that keep their data when the app restarts, is redeployed or is stopped. At most 8. " +
 					"Removing a volume deletes its data. An app with volumes runs one copy.",
@@ -281,6 +305,16 @@ var appPortAttrTypes = map[string]attr.Type{
 	"allow_cidrs": types.ListType{ElemType: types.StringType},
 }
 
+type appDatabaseModel struct {
+	Name types.String `tfsdk:"name"`
+	Env  types.Map    `tfsdk:"env"`
+}
+
+var appDatabaseAttrTypes = map[string]attr.Type{
+	"name": types.StringType,
+	"env":  types.MapType{ElemType: types.StringType},
+}
+
 type appVolumeModel struct {
 	Name      types.String `tfsdk:"name"`
 	SizeGi    types.Int64  `tfsdk:"size_gi"`
@@ -325,6 +359,7 @@ type containerAppModel struct {
 	Hostname    types.String    `tfsdk:"hostname"`
 	StartsAfter types.List      `tfsdk:"starts_after"`
 	Port        types.List      `tfsdk:"port"`
+	Database    types.List      `tfsdk:"database"`
 	Volume      types.List      `tfsdk:"volume"`
 	Stopped     types.Bool      `tfsdk:"stopped"`
 	Ready       types.Bool      `tfsdk:"ready"`
@@ -382,6 +417,84 @@ func appConfigErrors(m containerAppModel) [][2]string {
 var dnsLabelRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 const maxVolumes = 8
+
+// The platform's rules for database links: how many databases an app links,
+// how many variables each gives, what a variable is called and what it may
+// carry.
+const (
+	maxDatabaseLinks = 8
+	maxLinkVars      = 12
+)
+
+var (
+	envNameRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	linkFields = []string{"host", "port", "database", "username", "password", "url"}
+)
+
+// databaseErrors checks the database blocks as written: at most 8, each
+// database once, 1 to 12 variables each, a detail the platform knows, and
+// every variable name valid and used once in the app (env and secret_env
+// too). Values not known yet are left for the platform to check.
+func databaseErrors(dbs []appDatabaseModel, env, secretEnv types.Map) [][2]string {
+	var out [][2]string
+	if len(dbs) > maxDatabaseLinks {
+		out = append(out, [2]string{"Too many databases", fmt.Sprintf("An app uses at most %d databases; this one has %d.", maxDatabaseLinks, len(dbs))})
+	}
+	taken := map[string]string{}
+	for _, m := range []struct {
+		attr string
+		v    types.Map
+	}{{"env", env}, {"secret_env", secretEnv}} {
+		if m.v.IsNull() || m.v.IsUnknown() {
+			continue
+		}
+		for name := range m.v.Elements() {
+			taken[name] = m.attr
+		}
+	}
+	seen := map[string]bool{}
+	for _, d := range dbs {
+		name := d.Name.ValueString()
+		if !d.Name.IsUnknown() && !d.Name.IsNull() {
+			if seen[name] {
+				out = append(out, [2]string{"Duplicate database", fmt.Sprintf("The database %q is linked twice: put all its variables in one block.", name)})
+			}
+			seen[name] = true
+		}
+		if d.Env.IsNull() || d.Env.IsUnknown() {
+			continue
+		}
+		vars := d.Env.Elements()
+		if len(vars) == 0 {
+			out = append(out, [2]string{"No variables", fmt.Sprintf("Database %q: env names at least one variable and the detail it carries (%s).", name, strings.Join(linkFields, ", "))})
+		}
+		if len(vars) > maxLinkVars {
+			out = append(out, [2]string{"Too many variables", fmt.Sprintf("Database %q: at most %d variables per database; this block has %d.", name, maxLinkVars, len(vars))})
+		}
+		keys := make([]string, 0, len(vars))
+		for k := range vars {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if !envNameRe.MatchString(k) {
+				out = append(out, [2]string{"Invalid variable name", fmt.Sprintf("Database %q: %q isn't an environment variable name (letters, digits and _, not starting with a digit).", name, k)})
+			}
+			if where, ok := taken[k]; ok {
+				out = append(out, [2]string{"Variable set twice", fmt.Sprintf("Database %q: %s is already set in this app's %s.", name, k, where)})
+			}
+			taken[k] = fmt.Sprintf("database %q block", name)
+			f, _ := vars[k].(types.String)
+			if f.IsUnknown() || f.IsNull() {
+				continue
+			}
+			if !slices.Contains(linkFields, f.ValueString()) {
+				out = append(out, [2]string{"Unknown database detail", fmt.Sprintf("Database %q: %s = %q must be one of %s.", name, k, f.ValueString(), strings.Join(linkFields, ", "))})
+			}
+		}
+	}
+	return out
+}
 
 // portErrors checks the port blocks as written: a raw port is tcp or udp,
 // never internal, and allow_cidrs are real CIDRs on a port that has a public
@@ -534,6 +647,13 @@ func (r *containerAppResource) ValidateConfig(ctx context.Context, req resource.
 		resp.Diagnostics.Append(cfg.Volume.ElementsAs(ctx, &vols, false)...)
 		for _, e := range volumeErrors(vols) {
 			resp.Diagnostics.AddAttributeError(path.Root("volume"), e[0], e[1])
+		}
+	}
+	if !cfg.Database.IsNull() && !cfg.Database.IsUnknown() {
+		var dbs []appDatabaseModel
+		resp.Diagnostics.Append(cfg.Database.ElementsAs(ctx, &dbs, false)...)
+		for _, e := range databaseErrors(dbs, cfg.Env, cfg.SecretEnv) {
+			resp.Diagnostics.AddAttributeError(path.Root("database"), e[0], e[1])
 		}
 	}
 }
@@ -726,6 +846,19 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 		m.StartsAfter.ElementsAs(ctx, &after, false)
 		spec["dependsOn"] = after
 	}
+	if !m.Database.IsNull() && !m.Database.IsUnknown() {
+		var dbs []appDatabaseModel
+		m.Database.ElementsAs(ctx, &dbs, false)
+		if len(dbs) > 0 {
+			links := make([]map[string]any, 0, len(dbs))
+			for _, d := range dbs {
+				var env map[string]string
+				d.Env.ElementsAs(ctx, &env, false)
+				links = append(links, map[string]any{"id": d.Name.ValueString(), "env": env})
+			}
+			spec["databases"] = links
+		}
+	}
 	return spec
 }
 
@@ -809,6 +942,34 @@ func readEnvMap(prev types.Map, raw []any, valueFromAPI bool) types.Map {
 		}
 	}
 	return types.MapValueMust(types.StringType, kv)
+}
+
+// readDatabases maps the app's database links back into state, in the
+// platform's order, so a link changed outside Terraform shows as drift and an
+// import fills the blocks. Nothing in a link is write-only.
+func readDatabases(sp map[string]any) types.List {
+	objType := types.ObjectType{AttrTypes: appDatabaseAttrTypes}
+	raw, _ := sp["databases"].([]any)
+	vals := make([]attr.Value, 0, len(raw))
+	for _, e := range raw {
+		l, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := l["id"].(string)
+		env := map[string]attr.Value{}
+		if m, ok := l["env"].(map[string]any); ok {
+			for k, v := range m {
+				s, _ := v.(string)
+				env[k] = types.StringValue(s)
+			}
+		}
+		vals = append(vals, types.ObjectValueMust(appDatabaseAttrTypes, map[string]attr.Value{
+			"name": types.StringValue(id),
+			"env":  types.MapValueMust(types.StringType, env),
+		}))
+	}
+	return types.ListValueMust(objType, vals)
 }
 
 // sizeGi reads a volume size the platform reports ("10Gi", "1Ti") as GiB.
@@ -1079,6 +1240,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 		state.StartsAfter = types.ListNull(types.StringType)
 	}
 	state.Port = readPorts(state.Port, sp)
+	state.Database = readDatabases(sp)
 	state.Volume = readVolumes(state.Volume, sp)
 	state.Stopped = types.BoolValue(w.Stopped)
 	refreshAppStatus(ctx, r.data.Client, state.Name.ValueString(), &state, &resp.Diagnostics)

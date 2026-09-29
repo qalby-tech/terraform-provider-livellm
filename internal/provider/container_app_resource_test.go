@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -524,5 +526,120 @@ func TestUpdateWorkloadBody(t *testing.T) {
 	}
 	if s := stopAfterCreateBody(ctx, kept); s == nil || !s.Stopped || s.ID != "web" || s.Pod["image"] != "nginx" {
 		t.Errorf("a stopped app is stopped right after create: %+v", s)
+	}
+}
+
+func envMap(kv ...string) types.Map {
+	m := map[string]attr.Value{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		m[kv[i]] = types.StringValue(kv[i+1])
+	}
+	return types.MapValueMust(types.StringType, m)
+}
+
+func databaseList(t *testing.T, dbs []appDatabaseModel) types.List {
+	t.Helper()
+	l, d := types.ListValueFrom(context.Background(), types.ObjectType{AttrTypes: appDatabaseAttrTypes}, dbs)
+	if d.HasError() {
+		t.Fatalf("database list: %v", d)
+	}
+	return l
+}
+
+// database blocks go out as pod.databases, one link each, in the order
+// written; none, nothing is sent.
+func TestContainerAppSpecDatabases(t *testing.T) {
+	ctx := context.Background()
+	m := containerAppModel{
+		Name: types.StringValue("cloud"), Image: types.StringValue("nextcloud:stable-apache"),
+		Database: databaseList(t, []appDatabaseModel{
+			{Name: types.StringValue("cloud-db"), Env: envMap("POSTGRES_HOST", "host", "POSTGRES_PASSWORD", "password")},
+			{Name: types.StringValue("cloud-cache"), Env: envMap("REDIS_URL", "url")},
+		}),
+	}
+	got, _ := containerAppSpec(ctx, m, false)["databases"].([]map[string]any)
+	want := []map[string]any{
+		{"id": "cloud-db", "env": map[string]string{"POSTGRES_HOST": "host", "POSTGRES_PASSWORD": "password"}},
+		{"id": "cloud-cache", "env": map[string]string{"REDIS_URL": "url"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("databases: %v, want %v", got, want)
+	}
+	m.Database = databaseList(t, nil)
+	if _, ok := containerAppSpec(ctx, m, false)["databases"]; ok {
+		t.Error("no database blocks, no databases")
+	}
+	// A full save of an app whose last block went sends none: the link is gone.
+	if _, ok := updateWorkloadBody(ctx, m, false).Pod["databases"]; ok {
+		t.Error("an update without database blocks must not send a link")
+	}
+}
+
+func TestDatabaseErrors(t *testing.T) {
+	str := types.StringValue
+	db := func(name string, kv ...string) appDatabaseModel {
+		return appDatabaseModel{Name: str(name), Env: envMap(kv...)}
+	}
+	null := types.MapNull(types.StringType)
+	ok := []appDatabaseModel{db("db", "DATABASE_URL", "url", "PGUSER", "username"), db("cache", "REDIS_HOST", "host")}
+	if errs := databaseErrors(ok, envMap("MODE", "prod"), null); len(errs) != 0 {
+		t.Errorf("valid links refused: %v", errs)
+	}
+	unknown := []appDatabaseModel{{Name: types.StringUnknown(), Env: types.MapUnknown(types.StringType)}}
+	if errs := databaseErrors(unknown, null, null); len(errs) != 0 {
+		t.Errorf("values not known yet are for the platform to check: %v", errs)
+	}
+	many := make([]appDatabaseModel, 9)
+	for i := range many {
+		many[i] = db(fmt.Sprintf("db%d", i), fmt.Sprintf("V%d", i), "host")
+	}
+	manyVars := []string{}
+	for i := 0; i < 13; i++ {
+		manyVars = append(manyVars, fmt.Sprintf("V%d", i), "host")
+	}
+	cases := []struct {
+		name        string
+		dbs         []appDatabaseModel
+		env, secret types.Map
+		want        string
+	}{
+		{"more than 8", many, null, null, "Too many databases"},
+		{"the same database twice", []appDatabaseModel{db("db", "A", "host"), db("db", "B", "port")}, null, null, "Duplicate database"},
+		{"no variables", []appDatabaseModel{db("db")}, null, null, "No variables"},
+		{"more than 12 variables", []appDatabaseModel{db("db", manyVars...)}, null, null, "Too many variables"},
+		{"a name that isn't a variable", []appDatabaseModel{db("db", "1URL", "url")}, null, null, "Invalid variable name"},
+		{"a detail there isn't", []appDatabaseModel{db("db", "HOST", "hostname")}, null, null, "Unknown database detail"},
+		{"a name env has", []appDatabaseModel{db("db", "MODE", "host")}, envMap("MODE", "x"), null, "Variable set twice"},
+		{"a name secret_env has", []appDatabaseModel{db("db", "PW", "password")}, null, envMap("PW", "x"), "Variable set twice"},
+		{"a name two databases give", []appDatabaseModel{db("db", "HOST", "host"), db("cache", "HOST", "host")}, null, null, "Variable set twice"},
+	}
+	for _, c := range cases {
+		errs := databaseErrors(c.dbs, c.env, c.secret)
+		found := false
+		for _, e := range errs {
+			found = found || e[0] == c.want
+		}
+		if !found {
+			t.Errorf("%s: want %q, got %v", c.name, c.want, errs)
+		}
+	}
+}
+
+// The links read back as the platform keeps them, so a change made in the
+// console shows as drift and an import fills the blocks.
+func TestReadDatabases(t *testing.T) {
+	got := readDatabases(map[string]any{"databases": []any{
+		map[string]any{"id": "cloud-db", "env": map[string]any{"POSTGRES_HOST": "host", "POSTGRES_PASSWORD": "password"}},
+		map[string]any{"id": "cloud-cache", "env": map[string]any{"REDIS_URL": "url"}},
+	}})
+	want := databaseList(t, []appDatabaseModel{
+		{Name: types.StringValue("cloud-db"), Env: envMap("POSTGRES_HOST", "host", "POSTGRES_PASSWORD", "password")},
+		{Name: types.StringValue("cloud-cache"), Env: envMap("REDIS_URL", "url")},
+	})
+	if !got.Equal(want) {
+		t.Errorf("read %v, want %v", got, want)
+	}
+	if empty := readDatabases(map[string]any{}); empty.IsNull() || len(empty.Elements()) != 0 {
+		t.Errorf("no links read as no blocks: %v", empty)
 	}
 }

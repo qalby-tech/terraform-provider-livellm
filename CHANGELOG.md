@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Added** `database` blocks to `livellm_container_app` (at most 8): each
+  links a managed database (`name`, e.g. `livellm_storage.db.name`) and maps
+  environment variables to its connection details in `env` — `host`, `port`,
+  `database`, `username`, `password` or `url` (a Redis database gives `host`,
+  `port`, `url` and `password`). The password and the URL are read from the
+  database's own login, so nothing secret reaches the app's settings or state.
+  The app waits for its databases before it starts. The plan checks what the
+  platform checks: 1 to 12 variables per block, variable names, the details,
+  each database once, and a name used once across `env`, `secret_env` and the
+  blocks. Links are read back on refresh and on import.
 - `livellm_vm`: a Windows machine takes `ssh_keys` like a Linux one. The keys
   open its SSH (PowerShell) for `username`, next to the workspace's own; the
   plan-time refusal is gone.
