@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed** `livellm_storage` without `username`: the platform reports its
+  default login name, `app`, and every later plan replaced the database. A
+  configuration that leaves `username` out now reads as having none while the
+  platform reports `app`; any other name still shows as a change.
+- **Fixed** a delete that the platform finished but answered too late for the
+  connection (it clears away what belonged to the resource first): the
+  provider looks at the workspace, and a resource gone from it is deleted
+  rather than an error.
 - **Added** `database` blocks to `livellm_container_app` (at most 8): each
   links a managed database (`name`, e.g. `livellm_storage.db.name`) and maps
   environment variables to its connection details in `env` — `host`, `port`,

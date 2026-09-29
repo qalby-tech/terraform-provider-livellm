@@ -10,6 +10,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -194,8 +195,26 @@ func (c *Client) UpdateWorkload(ctx context.Context, id string, w Workload) erro
 	return c.do(ctx, http.MethodPut, "/v1/workloads/"+id, w, nil)
 }
 
+// DeleteWorkload deletes one workload. A delete clears away what belonged to
+// the workload before the platform answers, which can take longer than the
+// connection lasts: when no answer came back at all, the workspace is looked
+// at, and a workload no longer in it was deleted.
 func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
 	c.writes.Lock()
-	defer c.writes.Unlock()
-	return c.do(ctx, http.MethodDelete, "/v1/workloads/"+id, nil, nil)
+	err := c.do(ctx, http.MethodDelete, "/v1/workloads/"+id, nil, nil)
+	c.writes.Unlock()
+	var refused *APIError
+	if err == nil || errors.As(err, &refused) || ctx.Err() != nil {
+		return err
+	}
+	ws, lookErr := c.Workloads(ctx)
+	if lookErr != nil {
+		return err
+	}
+	for _, w := range ws {
+		if w.ID == id {
+			return err
+		}
+	}
+	return nil
 }

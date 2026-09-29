@@ -322,6 +322,21 @@ func (keepSizeWhenUnset) PlanModifyString(_ context.Context, req planmodifier.St
 	resp.PlanValue = req.StateValue
 }
 
+// defaultUsername is the login the platform gives a database whose
+// configuration names none.
+const defaultUsername = "app"
+
+// readUsername is the login name as state keeps it: a configuration that
+// left username out stays without one while the platform reports its own
+// default (else every plan would replace the database), and any other name
+// the platform reports is read back.
+func readUsername(prev types.String, api string) types.String {
+	if prev.IsNull() && api == defaultUsername {
+		return prev
+	}
+	return types.StringValue(api)
+}
+
 // readStorageSizes fills the sizes the platform decided when the
 // configuration left them out, so the next write sends them back unchanged.
 func readStorageSizes(state *storageModel, sp map[string]any) {
@@ -473,7 +488,7 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 	if creds, ok := sp["credentials"].(map[string]any); ok {
 		if v, ok := creds["username"].(string); ok && v != "" {
-			state.Username = types.StringValue(v)
+			state.Username = readUsername(state.Username, v)
 		}
 	}
 	if network, ok := sp["network"].(map[string]any); ok {

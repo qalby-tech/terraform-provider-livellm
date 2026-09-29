@@ -192,3 +192,25 @@ func TestKeepSizeWhenUnset(t *testing.T) {
 		t.Errorf("disk saved without a size: planned %v, want null", resp.PlanValue)
 	}
 }
+
+// A database configured without a username reads back without one while the
+// platform reports its default, so the next plan doesn't replace it.
+func TestReadUsername(t *testing.T) {
+	null := types.StringNull()
+	cases := []struct {
+		name string
+		prev types.String
+		api  string
+		want types.String
+	}{
+		{"left out, the platform's default", null, "app", null},
+		{"left out, another name (set elsewhere, or imported)", null, "nextcloud", types.StringValue("nextcloud")},
+		{"configured as the default", types.StringValue("app"), "app", types.StringValue("app")},
+		{"configured, changed elsewhere", types.StringValue("shop"), "app", types.StringValue("app")},
+	}
+	for _, c := range cases {
+		if got := readUsername(c.prev, c.api); !got.Equal(c.want) {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}
