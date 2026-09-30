@@ -41,7 +41,13 @@ func findWorkload(ws []client.Workload, id string) *client.Workload {
 
 // waitReady polls the workspace status until the workload reports ready,
 // fails, or ctx (the per-resource timeout) expires. A stopped workload is
-// waited for by existence only — a halted VM never turns ready.
+// waited for by existence only — a halted VM never turns ready. Right after a
+// change the old version may still read ready: a status that says the change
+// is still rolling out (updating) is waited through, so ready means the new
+// spec is up.
+// pollEvery is how often a wait looks at the workspace again.
+var pollEvery = 5 * time.Second
+
 func waitReady(ctx context.Context, c *client.Client, id string, stopped bool) error {
 	var last string
 	for {
@@ -54,7 +60,7 @@ func waitReady(ctx context.Context, c *client.Client, id string, stopped bool) e
 				if stopped {
 					return nil // it exists; halted is its desired state
 				}
-				if w.Ready {
+				if w.Ready && !w.Updating {
 					return nil
 				}
 				if w.Phase == "Failed" {
@@ -69,7 +75,7 @@ func waitReady(ctx context.Context, c *client.Client, id string, stopped bool) e
 				last = "no status reported yet"
 			}
 			return fmt.Errorf("timed out waiting for %q to become ready (last status: %s)", id, last)
-		case <-time.After(5 * time.Second):
+		case <-time.After(pollEvery):
 		}
 	}
 }

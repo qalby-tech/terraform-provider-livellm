@@ -116,10 +116,13 @@ type EndpointStatus struct {
 
 // WorkloadStatus is the live view of one workload (GET /v1/status).
 type WorkloadStatus struct {
-	ID        string           `json:"id"`
-	Type      string           `json:"type"`
-	Phase     string           `json:"phase"`
-	Ready     bool             `json:"ready"`
+	ID    string `json:"id"`
+	Type  string `json:"type"`
+	Phase string `json:"phase"`
+	Ready bool   `json:"ready"`
+	// Updating is true while a change to it is still rolling out: ready then
+	// still describes the old version, so it is not taken for the new one.
+	Updating  bool             `json:"updating,omitempty"`
 	Message   string           `json:"message,omitempty"`
 	SSH       string           `json:"ssh,omitempty"`
 	Endpoints []EndpointStatus `json:"endpoints,omitempty"`

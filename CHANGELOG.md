@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed** an apply that changed a `livellm_desktop_app` (or any resource
+  that waits for ready: `livellm_vm`, `livellm_container_app`,
+  `livellm_storage`, `livellm_browser`, `livellm_browser_api`) finishing on
+  the old version: right after the change the old desktop still answered, so
+  the wait ended at once and the refresh that followed stored `ready = false`
+  while the new one started. The platform now says a change is still rolling
+  out (`updating`), and the wait lasts until the new version is ready.
 - **Removed (breaking)** `replicas` and `desktops_ready` from
   `livellm_desktop_app`: a Desktop App is one desktop. Make one resource for
   each desktop (`for_each` over their names); `ready` says whether it is up.
