@@ -39,24 +39,32 @@ func findWorkload(ws []client.Workload, id string) *client.Workload {
 	return nil
 }
 
+// pollEvery is how often a wait looks at the workspace again.
+var pollEvery = 5 * time.Second
+
 // waitReady polls the workspace status until the workload reports ready,
 // fails, or ctx (the per-resource timeout) expires. A stopped workload is
 // waited for by existence only — a halted VM never turns ready. Right after a
 // change the old version may still read ready: a status that says the change
 // is still rolling out (updating) is waited through, so ready means the new
-// spec is up.
-// pollEvery is how often a wait looks at the workspace again.
-var pollEvery = 5 * time.Second
-
+// spec is up. When the platform could not be read at the end (unreachable,
+// or refusing), the error says so and why, next to the last status it saw.
 func waitReady(ctx context.Context, c *client.Client, id string, stopped bool) error {
 	var last string
+	var lastErr error
 	for {
 		st, err := c.Status(ctx)
+		if err != nil && ctx.Err() == nil {
+			lastErr = err
+		}
 		if err == nil {
+			lastErr = nil
+			found := false
 			for _, w := range st.Workloads {
 				if w.ID != id {
 					continue
 				}
+				found = true
 				if stopped {
 					return nil // it exists; halted is its desired state
 				}
@@ -68,10 +76,18 @@ func waitReady(ctx context.Context, c *client.Client, id string, stopped bool) e
 				}
 				last = strings.TrimSpace(w.Phase + " " + w.Message)
 			}
+			if !found {
+				last = "not in the workspace's status"
+			}
 		}
 		select {
 		case <-ctx.Done():
-			if last == "" {
+			switch {
+			case lastErr != nil && last != "":
+				last += "; then the workspace's status could not be read: " + lastErr.Error()
+			case lastErr != nil:
+				last = "the workspace's status could not be read: " + lastErr.Error()
+			case last == "":
 				last = "no status reported yet"
 			}
 			return fmt.Errorf("timed out waiting for %q to become ready (last status: %s)", id, last)

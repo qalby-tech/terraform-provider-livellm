@@ -54,3 +54,30 @@ func TestWaitReadyWaitsThroughAnUpdate(t *testing.T) {
 		t.Errorf("timed out while updating: %v", err)
 	}
 }
+
+// A platform that can't be read for the whole wait (an address that answers
+// nothing) ends the wait with why, not "no status reported yet"; one whose
+// status lacks the resource says that.
+func TestWaitReadySaysWhyItSawNoStatus(t *testing.T) {
+	pollEvery = 10 * time.Millisecond
+	defer func() { pollEvery = 5 * time.Second }()
+	dead := httptest.NewServer(http.NotFoundHandler())
+	addr := dead.URL
+	dead.Close() // nothing listens there any more
+	short, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	err := waitReady(short, client.New(addr, "llc_test"), "win", true)
+	if err == nil || !strings.Contains(err.Error(), "status could not be read") || strings.Contains(err.Error(), "no status reported yet") {
+		t.Errorf("unreachable: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"workloads":[{"id":"other","type":"desktop","phase":"Running","ready":true}]}`))
+	}))
+	defer srv.Close()
+	short2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+	if err := waitReady(short2, client.New(srv.URL, "llc_test"), "win", false); err == nil || !strings.Contains(err.Error(), "not in the workspace's status") {
+		t.Errorf("missing: %v", err)
+	}
+}

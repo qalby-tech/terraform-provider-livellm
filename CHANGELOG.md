@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed** a wait that timed out while the platform could not be read (an
+  address that stopped answering mid-apply) reporting "no status reported
+  yet": the error now says the workspace's status could not be read and why,
+  after the last status it saw. A resource missing from the status says so.
 - **Fixed** an apply that changed a `livellm_desktop_app` (or any resource
   that waits for ready: `livellm_vm`, `livellm_container_app`,
   `livellm_storage`, `livellm_browser`, `livellm_browser_api`) finishing on
