@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 (breaking)
 
 - **Fixed** a wait that timed out while the platform could not be read (an
   address that stopped answering mid-apply) reporting "no status reported
