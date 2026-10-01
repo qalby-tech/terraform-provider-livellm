@@ -76,6 +76,21 @@ resource "livellm_storage" "cache" {
 }
 ```
 
+Where it runs is optional: by default LiveLLM picks the host.
+
+```terraform
+resource "livellm_storage" "eu_db" {
+  name   = "eu-db"
+  engine = "postgres"
+
+  password_wo         = var.db_password
+  password_wo_version = 1
+
+  placement_strategy = "region" # or "host" with placement_host
+  placement_region   = "eu-1"
+}
+```
+
 ## Schema
 
 ### Required
@@ -98,6 +113,9 @@ resource "livellm_storage" "cache" {
 - `backup` (Block) Backups, Postgres only. With the block backups are on; without it they are off (a plan shows backups turned on or off elsewhere as a change).
   - `mode` (String) `daily` (the default): a full copy each night. `continuous`: the nightly copy plus every change in between, restorable to any minute inside `keep_days`. `manual`: nothing scheduled; backups taken by hand are kept.
   - `keep_days` (Number) How many days backups are kept, `1`..`365`; `10` when unset.
+- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down. With `host`, every copy of the database (`instances = 3`) runs on that host.
+- `placement_region` (String) Region to run in (`placement_strategy = "region"`).
+- `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 
 ### Read-Only
 

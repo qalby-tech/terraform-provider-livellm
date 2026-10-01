@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.11.0 (unreleased)
+
+- **Added** where it runs to `livellm_container_app`, `livellm_storage`,
+  `livellm_browser`, `livellm_browser_api` and `livellm_desktop_app`, the
+  same three attributes `livellm_vm` has: `placement_strategy` (`auto`,
+  `region` or `host`), `placement_region` and `placement_host`. Left out, the
+  platform picks the host, as before. A change is an update in place: the
+  resource restarts where it now belongs. Refresh and import read it back, so
+  a location changed in the console shows in the plan. A resource pinned to a
+  host waits for that host while it is down; with `host`, every copy of a
+  database runs on that host; an app with volumes and a location stops before
+  its new copy starts, so each change briefly takes it offline.
+- **Added** the `livellm_hosts` data source: the hosts resources can run on
+  (`id`, `region`, `zone`, `ready`), for `placement_host` and
+  `placement_region`.
+
 ## 0.10.0 (breaking)
 
 - **Fixed** a wait that timed out while the platform could not be read (an

@@ -18,6 +18,17 @@ resource "livellm_browser" "scraper" {
 }
 ```
 
+Pinned to one host (ids come from the `livellm_hosts` data source):
+
+```terraform
+resource "livellm_browser" "pinned" {
+  name = "pinned"
+
+  placement_strategy = "host"
+  placement_host     = "host-1"
+}
+```
+
 ## Schema
 
 ### Required
@@ -29,6 +40,9 @@ resource "livellm_browser" "scraper" {
 - `cpu` (String) CPU request, e.g. `1`.
 - `memory` (String) Memory request, e.g. `2Gi`.
 - `timeouts` (Block) `create` / `delete` (default 10m each).
+- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
+- `placement_region` (String) Region to run in (`placement_strategy = "region"`).
+- `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 
 ### Read-Only
 

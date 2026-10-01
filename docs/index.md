@@ -46,7 +46,7 @@ configuration; keys are secrets.
 
 | Resource | What it creates |
 |---|---|
-| [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, placement |
+| [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time |
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
 | [`livellm_browser`](resources/browser.md) | Headless Chromium with a live view and a CDP endpoint |
@@ -54,7 +54,15 @@ configuration; keys are secrets.
 | [`livellm_desktop_app`](resources/desktop_app.md) | A Linux desktop in a container that starts in seconds |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
-[`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md).
+[`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md),
+[`livellm_hosts`](data-sources/hosts.md).
+
+Every resource can say where it runs with `placement_strategy`,
+`placement_region` and `placement_host`. Left out, LiveLLM picks the host (the
+default); a region runs it on any of that region's hosts; a host pins it, and
+it waits for that host while the host is down. Changing it restarts the
+resource where it now belongs. A resource waiting for room still counts toward
+the plan. [`livellm_hosts`](data-sources/hosts.md) lists the hosts and regions.
 
 Creates and updates wait until the resource is actually serving; plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic. Create/update timeouts are configurable per resource via the standard `timeouts` block.

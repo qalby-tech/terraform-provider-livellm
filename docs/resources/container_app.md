@@ -231,6 +231,21 @@ resource "livellm_container_app" "grafana" {
 }
 ```
 
+Where it runs is optional: by default LiveLLM picks the host. A region
+runs it on any of the region's hosts:
+
+```terraform
+data "livellm_hosts" "all" {}
+
+resource "livellm_container_app" "near" {
+  name  = "near"
+  image = "nginx:1.27-alpine"
+
+  placement_strategy = "region" # or "host" with placement_host
+  placement_region   = data.livellm_hosts.all.hosts[0].region
+}
+```
+
 ## Schema
 
 ### Required
@@ -311,6 +326,9 @@ resource "livellm_container_app" "grafana" {
   **Removing a `volume` block deletes that volume and everything on it.** The
   plan warns about it by name before you apply. An app with volumes runs one
   copy of itself.
+- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down. An app with volumes and a location stops before its new copy starts, so each change briefly takes it offline.
+- `placement_region` (String) Region to run in (`placement_strategy = "region"`).
+- `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 
 ### Read-Only
 

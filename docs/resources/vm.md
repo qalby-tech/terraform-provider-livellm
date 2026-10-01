@@ -169,9 +169,9 @@ resource "livellm_vm" "build" {
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
 - `allow_cidrs` (List of String) Source CIDRs allowed to reach SSH and raw ports. Omit for workspace-internal only; `0.0.0.0/0` for public.
-- `placement_strategy` (String) `region` or `host`. Omit for automatic placement (the default).
-- `placement_region` (String) Region to schedule into.
-- `placement_host` (String) Host id to pin to.
+- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
+- `placement_region` (String) Region to run in (`placement_strategy = "region"`).
+- `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 - `timeouts` (Block) `create` (default 15m, 45m for Windows) / `delete` (default 10m).
 - `backup` (Block) Scheduled backups of the disk. Without the block none are scheduled; backups taken by hand are kept either way. A backup restores in place, with the machine stopped.
   - `schedule` (String, Required in the block) `@hourly`, `@daily`, `@weekly`, `@monthly` or a 5-field cron expression (UTC).

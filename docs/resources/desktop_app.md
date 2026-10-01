@@ -35,6 +35,17 @@ resource "livellm_desktop_app" "studio" {
 }
 ```
 
+A desktop in one region (by default LiveLLM picks the host):
+
+```terraform
+resource "livellm_desktop_app" "eu_desk" {
+  name = "eu-desk"
+
+  placement_strategy = "region" # or "host" with placement_host
+  placement_region   = "eu-1"
+}
+```
+
 ## Schema
 
 ### Required
@@ -51,6 +62,9 @@ resource "livellm_desktop_app" "studio" {
 - `storage_gi` (Number) With `keep_files`: the home folder in GiB (10 when left out). Replaces the app when changed.
 - `stopped` (Boolean) Stop the desktop without deleting the app. The home folder is kept and only it is billed.
 - `timeouts` (Block) `create` (default 15m) / `delete` (default 10m).
+- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
+- `placement_region` (String) Region to run in (`placement_strategy = "region"`).
+- `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 
 ### Read-Only
 
