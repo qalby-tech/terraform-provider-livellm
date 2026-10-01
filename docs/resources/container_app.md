@@ -242,7 +242,7 @@ resource "livellm_container_app" "near" {
   image = "nginx:1.27-alpine"
 
   placement_strategy = "region" # or "host" with placement_host
-  placement_region   = data.livellm_hosts.all.hosts[0].region
+  placement_region   = [for h in data.livellm_hosts.all.hosts : h.region if h.ready && h.schedulable && h.region != null][0]
 }
 ```
 

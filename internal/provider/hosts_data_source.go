@@ -38,6 +38,8 @@ func (d *hostsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 						"region": schema.StringAttribute{Computed: true, Description: "Its region, for placement_region; null if it has none."},
 						"zone":   schema.StringAttribute{Computed: true, Description: "Its zone within the region; null if it has none."},
 						"ready":  schema.BoolAttribute{Computed: true, Description: "Whether it is up."},
+						"schedulable": schema.BoolAttribute{Computed: true, Description: "Whether it takes new resources: a host set aside " +
+							"is up but takes none. A placement is accepted only on a host that is ready and schedulable."},
 					},
 				},
 			},
@@ -58,17 +60,19 @@ func (d *hostsDataSource) Configure(_ context.Context, req datasource.ConfigureR
 }
 
 var hostAttrTypes = map[string]attr.Type{
-	"id":     types.StringType,
-	"region": types.StringType,
-	"zone":   types.StringType,
-	"ready":  types.BoolType,
+	"id":          types.StringType,
+	"region":      types.StringType,
+	"zone":        types.StringType,
+	"ready":       types.BoolType,
+	"schedulable": types.BoolType,
 }
 
 type hostModel struct {
-	ID     types.String `tfsdk:"id"`
-	Region types.String `tfsdk:"region"`
-	Zone   types.String `tfsdk:"zone"`
-	Ready  types.Bool   `tfsdk:"ready"`
+	ID          types.String `tfsdk:"id"`
+	Region      types.String `tfsdk:"region"`
+	Zone        types.String `tfsdk:"zone"`
+	Ready       types.Bool   `tfsdk:"ready"`
+	Schedulable types.Bool   `tfsdk:"schedulable"`
 }
 
 type hostsModel struct {
@@ -88,10 +92,11 @@ func hostList(ctx context.Context, hs []client.Host) (types.List, error) {
 	rows := make([]hostModel, 0, len(hs))
 	for _, h := range hs {
 		rows = append(rows, hostModel{
-			ID:     types.StringValue(h.ID),
-			Region: optString(h.Region),
-			Zone:   optString(h.Zone),
-			Ready:  types.BoolValue(h.Ready),
+			ID:          types.StringValue(h.ID),
+			Region:      optString(h.Region),
+			Zone:        optString(h.Zone),
+			Ready:       types.BoolValue(h.Ready),
+			Schedulable: types.BoolValue(h.Schedulable == nil || *h.Schedulable),
 		})
 	}
 	list, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: hostAttrTypes}, rows)

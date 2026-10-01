@@ -15,7 +15,7 @@ Lists the hosts resources can run on, with their region: the values
 data "livellm_hosts" "all" {}
 
 locals {
-  regions = distinct([for h in data.livellm_hosts.all.hosts : h.region if h.ready && h.region != null])
+  regions = distinct([for h in data.livellm_hosts.all.hosts : h.region if h.ready && h.schedulable && h.region != null])
 }
 
 resource "livellm_container_app" "near" {
@@ -36,3 +36,8 @@ resource "livellm_container_app" "near" {
   - `region` (String) Its region, for `placement_region`; null if it has none.
   - `zone` (String) Its zone within the region; null if it has none.
   - `ready` (Boolean) Whether it is up.
+  - `schedulable` (Boolean) Whether it takes new resources: a host set aside
+    is up but takes none.
+
+A new or changed placement is accepted only on a host that is `ready` and
+`schedulable`; a placement that does not change is not checked again.

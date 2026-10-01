@@ -220,6 +220,10 @@ type Host struct {
 	Region string `json:"region,omitempty"`
 	Zone   string `json:"zone,omitempty"`
 	Ready  bool   `json:"ready"`
+	// Schedulable is whether the host takes new resources (a host set aside
+	// is ready but takes none); nil from a platform that does not say, which
+	// takes any ready host.
+	Schedulable *bool `json:"schedulable,omitempty"`
 }
 
 // FleetHosts lists the hosts a placement can name, with their region.

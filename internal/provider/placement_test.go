@@ -233,8 +233,8 @@ func TestHostsDataSource(t *testing.T) {
 			return
 		}
 		_, _ = rw.Write([]byte(`{"hosts":[
-			{"id":"selangor","region":"ru-mow","zone":"a","nodeGroup":"","cpuTotal":16,"cpuFree":4.5,"memTotalGi":64,"memFreeGi":31,"gpuTotal":0,"gpuFree":0,"utilization":0.2,"ready":true},
-			{"id":"spare","region":"eu-west","cpuTotal":8,"cpuFree":8,"memTotalGi":32,"memFreeGi":32,"gpuTotal":0,"gpuFree":0,"utilization":0,"ready":false},
+			{"id":"selangor","region":"ru-mow","zone":"a","nodeGroup":"","cpuTotal":16,"cpuFree":4.5,"memTotalGi":64,"memFreeGi":31,"gpuTotal":0,"gpuFree":0,"utilization":0.2,"ready":true,"schedulable":true},
+			{"id":"spare","region":"eu-west","cpuTotal":8,"cpuFree":8,"memTotalGi":32,"memFreeGi":32,"gpuTotal":0,"gpuFree":0,"utilization":0,"ready":false,"schedulable":false},
 			{"id":"bare","ready":true}]}`))
 	}))
 	defer srv.Close()
@@ -254,9 +254,9 @@ func TestHostsDataSource(t *testing.T) {
 	var hosts []hostModel
 	m.Hosts.ElementsAs(ctx, &hosts, false)
 	want := []hostModel{
-		{ID: str("selangor"), Region: str("ru-mow"), Zone: str("a"), Ready: types.BoolValue(true)},
-		{ID: str("spare"), Region: str("eu-west"), Zone: sNull, Ready: types.BoolValue(false)},
-		{ID: str("bare"), Region: sNull, Zone: sNull, Ready: types.BoolValue(true)},
+		{ID: str("selangor"), Region: str("ru-mow"), Zone: str("a"), Ready: types.BoolValue(true), Schedulable: types.BoolValue(true)},
+		{ID: str("spare"), Region: str("eu-west"), Zone: sNull, Ready: types.BoolValue(false), Schedulable: types.BoolValue(false)},
+		{ID: str("bare"), Region: sNull, Zone: sNull, Ready: types.BoolValue(true), Schedulable: types.BoolValue(true)},
 	}
 	if !reflect.DeepEqual(hosts, want) {
 		t.Errorf("hosts %v, want %v", hosts, want)
