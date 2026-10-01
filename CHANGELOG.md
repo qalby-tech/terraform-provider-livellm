@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.0 (unreleased)
+## 0.11.0
 
 - **Added** where it runs to `livellm_container_app`, `livellm_storage`,
   `livellm_browser`, `livellm_browser_api` and `livellm_desktop_app`, the
