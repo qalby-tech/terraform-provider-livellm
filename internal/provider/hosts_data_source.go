@@ -35,8 +35,8 @@ func (d *hostsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, 
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id":     schema.StringAttribute{Computed: true, Description: "Host id, for placement_host."},
-						"region": schema.StringAttribute{Computed: true, Description: "Its region, for placement_region."},
-						"zone":   schema.StringAttribute{Computed: true, Description: "Its zone within the region, if any."},
+						"region": schema.StringAttribute{Computed: true, Description: "Its region, for placement_region; null if it has none."},
+						"zone":   schema.StringAttribute{Computed: true, Description: "Its zone within the region; null if it has none."},
 						"ready":  schema.BoolAttribute{Computed: true, Description: "Whether it is up."},
 					},
 				},
@@ -75,14 +75,22 @@ type hostsModel struct {
 	Hosts types.List `tfsdk:"hosts"`
 }
 
+// optString is null for "" (a host without a region or zone label).
+func optString(v string) types.String {
+	if v == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(v)
+}
+
 // hostList turns the platform's host list into the hosts attribute.
 func hostList(ctx context.Context, hs []client.Host) (types.List, error) {
 	rows := make([]hostModel, 0, len(hs))
 	for _, h := range hs {
 		rows = append(rows, hostModel{
 			ID:     types.StringValue(h.ID),
-			Region: types.StringValue(h.Region),
-			Zone:   types.StringValue(h.Zone),
+			Region: optString(h.Region),
+			Zone:   optString(h.Zone),
 			Ready:  types.BoolValue(h.Ready),
 		})
 	}

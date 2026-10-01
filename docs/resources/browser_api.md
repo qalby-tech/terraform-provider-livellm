@@ -91,13 +91,13 @@ resource "livellm_browser_api" "eu" {
   nothing else changed: a write-only value alone makes no plan.
 - `cpu` (String) CPU request, e.g. `500m`.
 - `memory` (String) Memory request, e.g. `1Gi`.
+- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
+- `placement_region` (String) Region to run in (`placement_strategy = "region"`).
+- `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 - `timeouts` (Block) `create` / `delete` (default 10m each).
 
 A Browser API needs at least one of `browsers`, `all_browsers = true` or a
 `remote_browser` block.
-- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
-- `placement_region` (String) Region to run in (`placement_strategy = "region"`).
-- `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 
 ### Read-Only
 

@@ -139,7 +139,7 @@ func placementAttributes() map[string]schema.Attribute {
 			Description: "Where it runs: omit for automatic (the default; LiveLLM picks the host), \"region\" for any " +
 				"host in placement_region, \"host\" to pin placement_host. A resource pinned to a host waits for " +
 				"that host while it is down.",
-			Validators: []validator.String{stringvalidator.OneOf("auto", "host", "region")},
+			Validators: []validator.String{stringvalidator.OneOf("auto", "host", "region"), placementValueValidator{}},
 		},
 		"placement_host": schema.StringAttribute{
 			Optional:    true,
@@ -178,7 +178,9 @@ func placementSpec(strategy, host, region types.String) map[string]any {
 }
 
 // readPlacement reads a block's placement back: each value the platform
-// holds, null for what it doesn't (all three null when it runs automatically).
+// holds, null for what it doesn't. A placement that runs automatically (none,
+// "auto", or a strategy without its host or region) reads as all three null,
+// the same rule placementSpec and the platform use.
 func readPlacement(sp map[string]any) (strategy, host, region types.String) {
 	strategy, host, region = types.StringNull(), types.StringNull(), types.StringNull()
 	pl, _ := sp["placement"].(map[string]any)
@@ -188,21 +190,77 @@ func readPlacement(sp map[string]any) (strategy, host, region types.String) {
 		}
 		return types.StringNull()
 	}
-	if pl != nil {
-		strategy, host, region = str("strategy"), str("host"), str("region")
+	s, h, r := str("strategy"), str("host"), str("region")
+	switch s.ValueString() {
+	case "host":
+		if h.IsNull() {
+			return strategy, host, region
+		}
+	case "region":
+		if r.IsNull() {
+			return strategy, host, region
+		}
+	default:
+		return strategy, host, region
 	}
-	return strategy, host, region
+	return s, h, r
 }
 
 // refreshPlacement puts the platform's placement into state. A resource that
 // runs automatically and was written as automatic (left out, or "auto",
 // perhaps with a host or region next to it) keeps what was written, so it
 // plans no change; anything else takes the platform's values, so a location
-// changed in the console shows in the plan and an import is complete.
+// changed in the console shows in the plan and an import is complete. A host
+// or region written as "" stays "" where the platform holds none, since ""
+// and left out send the same thing.
 func refreshPlacement(sp map[string]any, strategy, host, region *types.String) {
 	s, h, r := readPlacement(sp)
 	if s.IsNull() && placementSpec(*strategy, *host, *region) == nil {
 		return
 	}
+	keepEmpty := func(read types.String, was *types.String) types.String {
+		if read.IsNull() && !was.IsNull() && !was.IsUnknown() && was.ValueString() == "" {
+			return *was
+		}
+		return read
+	}
+	h, r = keepEmpty(h, host), keepEmpty(r, region)
 	*strategy, *host, *region = s, h, r
+}
+
+// placementValueValidator refuses placement_strategy "host" without a
+// placement_host, or "region" without a placement_region, at plan time
+// rather than at apply. A value not known until apply passes.
+type placementValueValidator struct{}
+
+func (placementValueValidator) Description(context.Context) string {
+	return "placement_strategy \"host\" needs placement_host, \"region\" needs placement_region"
+}
+
+func (v placementValueValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (placementValueValidator) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	var key string
+	switch req.ConfigValue.ValueString() {
+	case "host":
+		key = "placement_host"
+	case "region":
+		key = "placement_region"
+	default:
+		return
+	}
+	var val types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, req.Path.ParentPath().AtName(key), &val)...)
+	if resp.Diagnostics.HasError() || val.IsUnknown() {
+		return
+	}
+	if val.IsNull() || val.ValueString() == "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Missing "+key,
+			fmt.Sprintf("placement_strategy = %q needs %s.", req.ConfigValue.ValueString(), key))
+	}
 }

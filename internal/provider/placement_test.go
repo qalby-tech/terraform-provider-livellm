@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -59,6 +60,20 @@ func TestReadPlacement(t *testing.T) {
 	if !s.IsNull() {
 		t.Errorf("nil block: %v", s)
 	}
+	// Stored placements that run automatically read as automatic.
+	for _, pl := range []map[string]any{
+		{"strategy": "auto"},
+		{"strategy": "auto", "host": "h1"},
+		{"strategy": ""},
+		{"strategy": "host"},
+		{"strategy": "region", "host": "h1"},
+		{"host": "h1"},
+	} {
+		s, h, r := readPlacement(map[string]any{"placement": pl})
+		if !s.IsNull() || !h.IsNull() || !r.IsNull() {
+			t.Errorf("%v: %v %v %v, want automatic", pl, s, h, r)
+		}
+	}
 }
 
 // Read-back: the platform's placement wins, except that an automatic one
@@ -76,6 +91,10 @@ func TestRefreshPlacement(t *testing.T) {
 		{"written auto stays", map[string]any{}, str("auto"), str("h1"), sNull, [3]types.String{str("auto"), str("h1"), sNull}},
 		{"moved to automatic in the console", map[string]any{}, str("region"), sNull, str("ru-mow"), [3]types.String{sNull, sNull, sNull}},
 		{"moved to a host in the console", placed, str("region"), sNull, str("ru-mow"), [3]types.String{str("host"), str("h1"), sNull}},
+		{"stored auto, written left out", map[string]any{"placement": map[string]any{"strategy": "auto"}}, sNull, sNull, sNull, [3]types.String{sNull, sNull, sNull}},
+		{"stored auto, written auto", map[string]any{"placement": map[string]any{"strategy": "auto"}}, str("auto"), sNull, sNull, [3]types.String{str("auto"), sNull, sNull}},
+		{"empty host next to a region stays", map[string]any{"placement": regionSpec}, str("region"), str(""), str("ru-mow"), [3]types.String{str("region"), str(""), str("ru-mow")}},
+		{"empty region next to a host stays", placed, str("host"), str("h1"), str(""), [3]types.String{str("host"), str("h1"), str("")}},
 	}
 	for _, c := range cases {
 		s, h, r := c.strategy, c.host, c.region
@@ -215,7 +234,8 @@ func TestHostsDataSource(t *testing.T) {
 		}
 		_, _ = rw.Write([]byte(`{"hosts":[
 			{"id":"selangor","region":"ru-mow","zone":"a","nodeGroup":"","cpuTotal":16,"cpuFree":4.5,"memTotalGi":64,"memFreeGi":31,"gpuTotal":0,"gpuFree":0,"utilization":0.2,"ready":true},
-			{"id":"spare","region":"eu-west","cpuTotal":8,"cpuFree":8,"memTotalGi":32,"memFreeGi":32,"gpuTotal":0,"gpuFree":0,"utilization":0,"ready":false}]}`))
+			{"id":"spare","region":"eu-west","cpuTotal":8,"cpuFree":8,"memTotalGi":32,"memFreeGi":32,"gpuTotal":0,"gpuFree":0,"utilization":0,"ready":false},
+			{"id":"bare","ready":true}]}`))
 	}))
 	defer srv.Close()
 	d := NewHostsDataSource()
@@ -235,9 +255,71 @@ func TestHostsDataSource(t *testing.T) {
 	m.Hosts.ElementsAs(ctx, &hosts, false)
 	want := []hostModel{
 		{ID: str("selangor"), Region: str("ru-mow"), Zone: str("a"), Ready: types.BoolValue(true)},
-		{ID: str("spare"), Region: str("eu-west"), Zone: str(""), Ready: types.BoolValue(false)},
+		{ID: str("spare"), Region: str("eu-west"), Zone: sNull, Ready: types.BoolValue(false)},
+		{ID: str("bare"), Region: sNull, Zone: sNull, Ready: types.BoolValue(true)},
 	}
 	if !reflect.DeepEqual(hosts, want) {
 		t.Errorf("hosts %v, want %v", hosts, want)
+	}
+}
+
+// A strategy without its host or region is refused at plan time, on every
+// resource; a value known only at apply passes.
+func TestPlacementNeedsItsValue(t *testing.T) {
+	ctx := context.Background()
+	var sr resource.SchemaResponse
+	NewContainerAppResource().Schema(ctx, resource.SchemaRequest{}, &sr)
+	typ := sr.Schema.Type().TerraformType(ctx).(tftypes.Object)
+	cfg := func(vals map[string]tftypes.Value) tfsdk.Config {
+		all := map[string]tftypes.Value{}
+		for k, at := range typ.AttributeTypes {
+			all[k] = tftypes.NewValue(at, nil)
+		}
+		for k, v := range vals {
+			all[k] = v
+		}
+		return tfsdk.Config{Schema: sr.Schema, Raw: tftypes.NewValue(typ, all)}
+	}
+	s := func(v string) tftypes.Value { return tftypes.NewValue(tftypes.String, v) }
+	cases := []struct {
+		name    string
+		vals    map[string]tftypes.Value
+		refused bool
+	}{
+		{"host without host", map[string]tftypes.Value{"placement_strategy": s("host")}, true},
+		{"host with empty host", map[string]tftypes.Value{"placement_strategy": s("host"), "placement_host": s("")}, true},
+		{"region without region", map[string]tftypes.Value{"placement_strategy": s("region"), "placement_host": s("h1")}, true},
+		{"host", map[string]tftypes.Value{"placement_strategy": s("host"), "placement_host": s("h1")}, false},
+		{"region", map[string]tftypes.Value{"placement_strategy": s("region"), "placement_region": s("ru-mow")}, false},
+		{"host known at apply", map[string]tftypes.Value{"placement_strategy": s("host"), "placement_host": tftypes.NewValue(tftypes.String, tftypes.UnknownValue)}, false},
+		{"auto", map[string]tftypes.Value{"placement_strategy": s("auto")}, false},
+		{"left out", nil, false},
+	}
+	for _, c := range cases {
+		conf := cfg(c.vals)
+		var v types.String
+		conf.GetAttribute(ctx, path.Root("placement_strategy"), &v)
+		resp := &validator.StringResponse{}
+		placementValueValidator{}.ValidateString(ctx, validator.StringRequest{
+			Path: path.Root("placement_strategy"), ConfigValue: v, Config: conf,
+		}, resp)
+		if got := resp.Diagnostics.HasError(); got != c.refused {
+			t.Errorf("%s: refused=%v, want %v (%v)", c.name, got, c.refused, resp.Diagnostics)
+		}
+	}
+	// Every resource's strategy carries the check.
+	for name, a := range placementAttributes() {
+		if name != "placement_strategy" {
+			continue
+		}
+		found := false
+		for _, v := range a.(interface{ StringValidators() []validator.String }).StringValidators() {
+			if _, ok := v.(placementValueValidator); ok {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("placement_strategy lacks the value check")
+		}
 	}
 }

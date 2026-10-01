@@ -14,7 +14,10 @@
   its new copy starts, so each change briefly takes it offline.
 - **Added** the `livellm_hosts` data source: the hosts resources can run on
   (`id`, `region`, `zone`, `ready`), for `placement_host` and
-  `placement_region`.
+  `placement_region`. A host without a region or zone has them null.
+- **Changed** `placement_strategy = "host"` without a `placement_host` (or
+  `"region"` without a `placement_region`) is now refused at plan time, on
+  every resource including `livellm_vm`, instead of failing at apply.
 
 ## 0.10.0 (breaking)
 
