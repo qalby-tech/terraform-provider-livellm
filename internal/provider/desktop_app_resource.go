@@ -102,6 +102,7 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
 		},
 	}
+	withPlacement(resp.Schema.Attributes)
 }
 
 func (r *desktopAppResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -117,16 +118,19 @@ func (r *desktopAppResource) Configure(_ context.Context, req resource.Configure
 }
 
 type desktopAppModel struct {
-	Name       types.String   `tfsdk:"name"`
-	Image      types.String   `tfsdk:"image"`
-	CPU        types.String   `tfsdk:"cpu"`
-	Memory     types.String   `tfsdk:"memory"`
-	Resolution types.String   `tfsdk:"resolution"`
-	KeepFiles  types.Bool     `tfsdk:"keep_files"`
-	StorageGi  types.Int64    `tfsdk:"storage_gi"`
-	Stopped    types.Bool     `tfsdk:"stopped"`
-	Ready      types.Bool     `tfsdk:"ready"`
-	Timeouts   timeouts.Value `tfsdk:"timeouts"`
+	Name              types.String   `tfsdk:"name"`
+	Image             types.String   `tfsdk:"image"`
+	CPU               types.String   `tfsdk:"cpu"`
+	Memory            types.String   `tfsdk:"memory"`
+	Resolution        types.String   `tfsdk:"resolution"`
+	KeepFiles         types.Bool     `tfsdk:"keep_files"`
+	StorageGi         types.Int64    `tfsdk:"storage_gi"`
+	Stopped           types.Bool     `tfsdk:"stopped"`
+	Ready             types.Bool     `tfsdk:"ready"`
+	Timeouts          timeouts.Value `tfsdk:"timeouts"`
+	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
+	PlacementHost     types.String   `tfsdk:"placement_host"`
+	PlacementRegion   types.String   `tfsdk:"placement_region"`
 }
 
 func (r *desktopAppResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -156,6 +160,9 @@ func desktopSpec(m desktopAppModel) map[string]any {
 			spec["storageSize"] = fmt.Sprintf("%dGi", m.StorageGi.ValueInt64())
 		}
 	}
+	if pl := placementSpec(m.PlacementStrategy, m.PlacementHost, m.PlacementRegion); pl != nil {
+		spec["placement"] = pl
+	}
 	return spec
 }
 
@@ -171,6 +178,7 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 		return types.StringNull()
 	}
 	m.Image, m.CPU, m.Memory, m.Resolution = str("image"), str("cpu"), str("memory"), str("resolution")
+	refreshPlacement(d, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	keep, _ := d["keepFiles"].(bool)
 	m.KeepFiles = types.BoolValue(keep)
 	m.StorageGi = types.Int64Null()

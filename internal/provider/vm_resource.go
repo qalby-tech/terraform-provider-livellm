@@ -153,19 +153,6 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				ElementType: types.StringType,
 				Description: "Source CIDRs allowed to reach SSH and any raw ports. Omit = reachable only from inside the workspace; \"0.0.0.0/0\" = public.",
 			},
-			"placement_strategy": schema.StringAttribute{
-				Optional:    true,
-				Description: "Where the VM runs: omit for automatic (the default — LiveLLM picks the host), \"region\" for any host in placement_region, \"host\" to pin placement_host.",
-				Validators:  []validator.String{stringvalidator.OneOf("auto", "host", "region")},
-			},
-			"placement_host": schema.StringAttribute{
-				Optional:    true,
-				Description: "Host id to pin to (placement_strategy = \"host\"). Hosts come from the fleet endpoint.",
-			},
-			"placement_region": schema.StringAttribute{
-				Optional:    true,
-				Description: "Region to schedule into (placement_strategy = \"region\").",
-			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the VM is up (false while stopped)."},
 			"ssh":   schema.StringAttribute{Computed: true, Description: "host:port to SSH into the VM, as reported by the platform."},
 			"url":   schema.StringAttribute{Computed: true, Description: "The first exposed HTTP port's public HTTPS URL."},
@@ -220,6 +207,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			},
 		},
 	}
+	withPlacement(resp.Schema.Attributes)
 }
 
 func (r *vmResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -530,15 +518,7 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	if b := m.Backup; b != nil && b.Schedule.ValueString() != "" {
 		spec["backup"] = map[string]any{"schedule": b.Schedule.ValueString(), "keep": b.Keep.ValueInt64()}
 	}
-	strategy := m.PlacementStrategy.ValueString()
-	if strategy != "" && strategy != "auto" {
-		pl := map[string]any{"strategy": strategy}
-		if v := m.PlacementHost.ValueString(); v != "" {
-			pl["host"] = v
-		}
-		if v := m.PlacementRegion.ValueString(); v != "" {
-			pl["region"] = v
-		}
+	if pl := placementSpec(m.PlacementStrategy, m.PlacementHost, m.PlacementRegion); pl != nil {
 		spec["placement"] = pl
 	}
 	return spec
@@ -764,15 +744,13 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		state.AllowCIDRs = types.ListValueMust(types.StringType, vals)
 	}
 	state.Backup = readVMBackup(sp["backup"])
-	if pl, ok := sp["placement"].(map[string]any); ok {
-		if v, ok := pl["strategy"].(string); ok && v != "" {
-			state.PlacementStrategy = types.StringValue(v)
-		}
-		if v, ok := pl["host"].(string); ok && v != "" {
-			state.PlacementHost = types.StringValue(v)
-		}
-		if v, ok := pl["region"].(string); ok && v != "" {
-			state.PlacementRegion = types.StringValue(v)
+	// A machine's placement fills in only what the platform holds, as it always has.
+	strategy, host, region := readPlacement(sp)
+	for _, f := range []struct{ read, state *types.String }{
+		{&strategy, &state.PlacementStrategy}, {&host, &state.PlacementHost}, {&region, &state.PlacementRegion},
+	} {
+		if !f.read.IsNull() {
+			*f.state = *f.read
 		}
 	}
 	refreshVMStatus(ctx, r.data.Client, &state, &resp.Diagnostics)

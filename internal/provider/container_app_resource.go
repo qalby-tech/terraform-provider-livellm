@@ -273,6 +273,7 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 			},
 		},
 	}
+	withPlacement(resp.Schema.Attributes)
 }
 
 func (r *containerAppResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -345,26 +346,29 @@ type imageAuthModel struct {
 }
 
 type containerAppModel struct {
-	Timeouts    timeouts.Value  `tfsdk:"timeouts"`
-	Name        types.String    `tfsdk:"name"`
-	Image       types.String    `tfsdk:"image"`
-	Source      *sourceModel    `tfsdk:"source"`
-	ImageAuth   *imageAuthModel `tfsdk:"image_auth"`
-	Command     types.List      `tfsdk:"command"`
-	CPU         types.String    `tfsdk:"cpu"`
-	Memory      types.String    `tfsdk:"memory"`
-	Env         types.Map       `tfsdk:"env"`
-	SecretEnv   types.Map       `tfsdk:"secret_env"`
-	Stack       types.String    `tfsdk:"stack"`
-	Hostname    types.String    `tfsdk:"hostname"`
-	StartsAfter types.List      `tfsdk:"starts_after"`
-	Port        types.List      `tfsdk:"port"`
-	Database    types.List      `tfsdk:"database"`
-	Volume      types.List      `tfsdk:"volume"`
-	Stopped     types.Bool      `tfsdk:"stopped"`
-	Ready       types.Bool      `tfsdk:"ready"`
-	URL         types.String    `tfsdk:"url"`
-	Endpoints   types.List      `tfsdk:"endpoints"`
+	Timeouts          timeouts.Value  `tfsdk:"timeouts"`
+	Name              types.String    `tfsdk:"name"`
+	Image             types.String    `tfsdk:"image"`
+	Source            *sourceModel    `tfsdk:"source"`
+	ImageAuth         *imageAuthModel `tfsdk:"image_auth"`
+	Command           types.List      `tfsdk:"command"`
+	CPU               types.String    `tfsdk:"cpu"`
+	Memory            types.String    `tfsdk:"memory"`
+	Env               types.Map       `tfsdk:"env"`
+	SecretEnv         types.Map       `tfsdk:"secret_env"`
+	Stack             types.String    `tfsdk:"stack"`
+	Hostname          types.String    `tfsdk:"hostname"`
+	StartsAfter       types.List      `tfsdk:"starts_after"`
+	Port              types.List      `tfsdk:"port"`
+	Database          types.List      `tfsdk:"database"`
+	Volume            types.List      `tfsdk:"volume"`
+	Stopped           types.Bool      `tfsdk:"stopped"`
+	Ready             types.Bool      `tfsdk:"ready"`
+	URL               types.String    `tfsdk:"url"`
+	Endpoints         types.List      `tfsdk:"endpoints"`
+	PlacementStrategy types.String    `tfsdk:"placement_strategy"`
+	PlacementHost     types.String    `tfsdk:"placement_host"`
+	PlacementRegion   types.String    `tfsdk:"placement_region"`
 }
 
 func (m containerAppModel) hasSource() bool {
@@ -859,6 +863,9 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 			spec["databases"] = links
 		}
 	}
+	if pl := placementSpec(m.PlacementStrategy, m.PlacementHost, m.PlacementRegion); pl != nil {
+		spec["placement"] = pl
+	}
 	return spec
 }
 
@@ -1243,6 +1250,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	state.Database = readDatabases(sp)
 	state.Volume = readVolumes(state.Volume, sp)
 	state.Stopped = types.BoolValue(w.Stopped)
+	refreshPlacement(sp, &state.PlacementStrategy, &state.PlacementHost, &state.PlacementRegion)
 	refreshAppStatus(ctx, r.data.Client, state.Name.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }

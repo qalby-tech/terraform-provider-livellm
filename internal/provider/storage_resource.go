@@ -155,6 +155,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			},
 		},
 	}
+	withPlacement(resp.Schema.Attributes)
 }
 
 func (r *storageResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -186,6 +187,9 @@ type storageModel struct {
 	Backup            *storageBackupModel `tfsdk:"backup"`
 	Ready             types.Bool          `tfsdk:"ready"`
 	Endpoints         types.List          `tfsdk:"endpoints"`
+	PlacementStrategy types.String        `tfsdk:"placement_strategy"`
+	PlacementHost     types.String        `tfsdk:"placement_host"`
+	PlacementRegion   types.String        `tfsdk:"placement_region"`
 }
 
 // storageBackupModel is the backup block: on when present.
@@ -268,6 +272,9 @@ func storageSpec(ctx context.Context, m storageModel, password string, update bo
 	}
 	if b := storageBackup(m, update); b != nil {
 		spec["backup"] = b
+	}
+	if pl := placementSpec(m.PlacementStrategy, m.PlacementHost, m.PlacementRegion); pl != nil {
+		spec["placement"] = pl
 	}
 	return spec
 }
@@ -510,6 +517,7 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 		}
 	}
 	readStorageBackup(&state, sp["backup"])
+	refreshPlacement(sp, &state.PlacementStrategy, &state.PlacementHost, &state.PlacementRegion)
 	refreshStorageStatus(ctx, r.data.Client, &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }

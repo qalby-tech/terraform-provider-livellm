@@ -213,3 +213,22 @@ func (c *Client) DeleteWorkload(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// Host is one host resources can run on (GET /v1/fleet/hosts).
+type Host struct {
+	ID     string `json:"id"`
+	Region string `json:"region,omitempty"`
+	Zone   string `json:"zone,omitempty"`
+	Ready  bool   `json:"ready"`
+}
+
+// FleetHosts lists the hosts a placement can name, with their region.
+func (c *Client) FleetHosts(ctx context.Context) ([]Host, error) {
+	var out struct {
+		Hosts []Host `json:"hosts"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/fleet/hosts", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Hosts, nil
+}

@@ -7,7 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
@@ -124,4 +128,81 @@ func statusOf(ctx context.Context, c *client.Client, id string) (*client.Workloa
 		}
 	}
 	return nil, nil
+}
+
+// placementAttributes is where a resource runs, the same three attributes on
+// every resource: placement_strategy, placement_host, placement_region.
+func placementAttributes() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"placement_strategy": schema.StringAttribute{
+			Optional: true,
+			Description: "Where it runs: omit for automatic (the default; LiveLLM picks the host), \"region\" for any " +
+				"host in placement_region, \"host\" to pin placement_host. A resource pinned to a host waits for " +
+				"that host while it is down.",
+			Validators: []validator.String{stringvalidator.OneOf("auto", "host", "region")},
+		},
+		"placement_host": schema.StringAttribute{
+			Optional:    true,
+			Description: "Host id to pin to (placement_strategy = \"host\"); ids come from the livellm_hosts data source.",
+		},
+		"placement_region": schema.StringAttribute{
+			Optional:    true,
+			Description: "Region to run in (placement_strategy = \"region\").",
+		},
+	}
+}
+
+// withPlacement adds the placement attributes to a resource's attributes.
+func withPlacement(attrs map[string]schema.Attribute) map[string]schema.Attribute {
+	for k, v := range placementAttributes() {
+		attrs[k] = v
+	}
+	return attrs
+}
+
+// placementSpec is the placement object sent inside the resource's block, or
+// nil for automatic (strategy left out or "auto"), which sends nothing.
+func placementSpec(strategy, host, region types.String) map[string]any {
+	s := strategy.ValueString()
+	if s == "" || s == "auto" {
+		return nil
+	}
+	pl := map[string]any{"strategy": s}
+	if v := host.ValueString(); v != "" {
+		pl["host"] = v
+	}
+	if v := region.ValueString(); v != "" {
+		pl["region"] = v
+	}
+	return pl
+}
+
+// readPlacement reads a block's placement back: each value the platform
+// holds, null for what it doesn't (all three null when it runs automatically).
+func readPlacement(sp map[string]any) (strategy, host, region types.String) {
+	strategy, host, region = types.StringNull(), types.StringNull(), types.StringNull()
+	pl, _ := sp["placement"].(map[string]any)
+	str := func(key string) types.String {
+		if v, _ := pl[key].(string); v != "" {
+			return types.StringValue(v)
+		}
+		return types.StringNull()
+	}
+	if pl != nil {
+		strategy, host, region = str("strategy"), str("host"), str("region")
+	}
+	return strategy, host, region
+}
+
+// refreshPlacement puts the platform's placement into state. A resource that
+// runs automatically and was written as automatic (left out, or "auto",
+// perhaps with a host or region next to it) keeps what was written, so it
+// plans no change; anything else takes the platform's values, so a location
+// changed in the console shows in the plan and an import is complete.
+func refreshPlacement(sp map[string]any, strategy, host, region *types.String) {
+	s, h, r := readPlacement(sp)
+	if s.IsNull() && placementSpec(*strategy, *host, *region) == nil {
+		return
+	}
+	*strategy, *host, *region = s, h, r
 }

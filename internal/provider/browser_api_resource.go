@@ -113,6 +113,7 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 			},
 		},
 	}
+	withPlacement(resp.Schema.Attributes)
 }
 
 func (r *browserAPIResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -151,6 +152,9 @@ type browserAPIModel struct {
 	Memory            types.String   `tfsdk:"memory"`
 	Ready             types.Bool     `tfsdk:"ready"`
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
+	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
+	PlacementHost     types.String   `tfsdk:"placement_host"`
+	PlacementRegion   types.String   `tfsdk:"placement_region"`
 }
 
 func (m browserAPIModel) browserNames(ctx context.Context) []string {
@@ -208,6 +212,9 @@ func browserAPISpec(ctx context.Context, m browserAPIModel, auth map[string]stri
 	}
 	if v := m.Memory.ValueString(); v != "" {
 		spec["memory"] = v
+	}
+	if pl := placementSpec(m.PlacementStrategy, m.PlacementHost, m.PlacementRegion); pl != nil {
+		spec["placement"] = pl
 	}
 	return spec
 }
@@ -326,6 +333,7 @@ func readBrowserAPI(prev browserAPIModel, sp map[string]any) browserAPIModel {
 	}
 	m.CPU = readOptional(prev.CPU, sp["cpu"])
 	m.Memory = readOptional(prev.Memory, sp["memory"])
+	refreshPlacement(sp, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	return m
 }
 

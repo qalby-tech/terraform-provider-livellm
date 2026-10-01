@@ -55,6 +55,7 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
 		},
 	}
+	withPlacement(resp.Schema.Attributes)
 }
 
 func (r *browserResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -70,11 +71,14 @@ func (r *browserResource) Configure(_ context.Context, req resource.ConfigureReq
 }
 
 type browserModel struct {
-	Name     types.String   `tfsdk:"name"`
-	CPU      types.String   `tfsdk:"cpu"`
-	Memory   types.String   `tfsdk:"memory"`
-	Ready    types.Bool     `tfsdk:"ready"`
-	Timeouts timeouts.Value `tfsdk:"timeouts"`
+	Name              types.String   `tfsdk:"name"`
+	CPU               types.String   `tfsdk:"cpu"`
+	Memory            types.String   `tfsdk:"memory"`
+	Ready             types.Bool     `tfsdk:"ready"`
+	Timeouts          timeouts.Value `tfsdk:"timeouts"`
+	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
+	PlacementHost     types.String   `tfsdk:"placement_host"`
+	PlacementRegion   types.String   `tfsdk:"placement_region"`
 }
 
 func browserSpec(ctx context.Context, m browserModel) map[string]any {
@@ -84,6 +88,9 @@ func browserSpec(ctx context.Context, m browserModel) map[string]any {
 	}
 	if v := m.Memory.ValueString(); v != "" {
 		spec["memory"] = v
+	}
+	if pl := placementSpec(m.PlacementStrategy, m.PlacementHost, m.PlacementRegion); pl != nil {
+		spec["placement"] = pl
 	}
 	return spec
 }
@@ -128,6 +135,7 @@ func (r *browserResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.State.RemoveResource(ctx)
 		return
 	}
+	refreshPlacement(w.Browser, &state.PlacementStrategy, &state.PlacementHost, &state.PlacementRegion)
 	st, _ := statusOf(ctx, r.data.Client, state.Name.ValueString())
 	state.Ready = types.BoolValue(st != nil && st.Ready)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
