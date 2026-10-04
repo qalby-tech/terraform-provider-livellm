@@ -55,6 +55,24 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("livellm api %d: %s", e.Status, e.Body)
 }
 
+// Message is the platform's own wording: the "error" of a JSON answer, or the
+// answer itself.
+func (e *APIError) Message() string {
+	var b struct {
+		Error  string `json:"error"`
+		Detail string `json:"detail"`
+	}
+	if json.Unmarshal([]byte(e.Body), &b) == nil {
+		if b.Error != "" {
+			return b.Error
+		}
+		if b.Detail != "" {
+			return b.Detail
+		}
+	}
+	return e.Body
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
@@ -126,6 +144,9 @@ type WorkloadStatus struct {
 	Message   string           `json:"message,omitempty"`
 	SSH       string           `json:"ssh,omitempty"`
 	Endpoints []EndpointStatus `json:"endpoints,omitempty"`
+	// ProfilesReady: a browser's profile can be saved, restored, exported and
+	// imported (browsers only).
+	ProfilesReady bool `json:"profilesReady,omitempty"`
 }
 
 type TenantStatus struct {

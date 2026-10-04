@@ -139,7 +139,7 @@ func TestPlacementInEveryBlock(t *testing.T) {
 	cases := []built{
 		{"pod", containerAppSpec(ctx, app(region, str("ru-mow")), false), containerAppSpec(ctx, app(auto, str("ru-mow")), false)},
 		{"storage", storageSpec(ctx, db(region, str("ru-mow")), "", true), storageSpec(ctx, db(sNull, sNull), "", true)},
-		{"browser", browserSpec(ctx, br(region, str("ru-mow"))), browserSpec(ctx, br(sNull, sNull))},
+		{"browser", browserSpec(ctx, br(region, str("ru-mow")), browserModel{}, nil), browserSpec(ctx, br(sNull, sNull), browserModel{}, nil)},
 		{"controller", browserAPISpec(ctx, api(region, str("ru-mow")), nil), browserAPISpec(ctx, api(auto, sNull), nil)},
 		{"desktop", desktopSpec(desk(region, str("ru-mow"))), desktopSpec(desk(sNull, str("ru-mow")))},
 		{"vm", vmSpec(ctx, vm(region, str("ru-mow")), vmWrite{}), vmSpec(ctx, vm(auto, sNull), vmWrite{})},
