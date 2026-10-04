@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.12.0
+
+- **Added** `locale`, `timezone` and `languages` to `livellm_browser`, along
+  with a `geolocation` block (`mode` `off` or `fixed`, with `latitude`,
+  `longitude` and `accuracy`). A browser can now speak a language and live in a
+  time zone of its own. Left out, `languages` follows `locale`. Changing any of
+  them restarts the browser and keeps its profile. Removing one puts the
+  browser back to its default.
+- **Added** a `proxy` block to `livellm_browser`:
+  - `upstream` blocks (`name`, `server` with `http`, `https` or `socks5`, and
+    `change_ip_method` / `min_change_ip_seconds` for mobile proxies);
+  - `rotation` (`off`, `session` or `interval`, `every_minutes`, `order`);
+  - `check_url`.
+
+  Logins and change-IP addresses are write-only (`username_wo`, `password_wo`,
+  `change_ip_url_wo`) and never reach state or a plan. They are sent when the
+  browser or an upstream is created, when an upstream's server changes, and
+  when `auth_version` changes; otherwise the stored ones are kept.
+  `has_auth` / `has_change_ip` show what is stored. Adding the block restarts
+  the browser once, later changes don't, and removing the block restarts it.
+  Changing a proxy needs an API key with the **proxies** permission, which a
+  person turns on on the Keys page. Without it the apply fails with the
+  platform's message, while updates that leave the proxy alone still work.
+- **Added** `profiles_ready` to `livellm_browser`: whether the browser's
+  profile can be saved, restored, exported and imported.
+- Configurations without the new arguments send exactly what 0.11.0 sent.
+
 ## 0.11.0
 
 - **Added** where it runs to `livellm_container_app`, `livellm_storage`,
