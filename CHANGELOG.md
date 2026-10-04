@@ -26,6 +26,14 @@
 - **Added** `profiles_ready` to `livellm_browser`: whether the browser's
   profile can be saved, restored, exported and imported.
 - Configurations without the new arguments send exactly what 0.11.0 sent.
+  Refresh reads a newer setting back only while the configuration sets it, so
+  a locale, time zone, geolocation or proxy set in the console for a browser
+  whose configuration leaves it out is kept and doesn't show in the plan. An
+  import reads them all. `lifecycle { ignore_changes = [proxy] }` keeps a
+  proxy and its stored logins as the console has them.
+- `change_ip_method` and `min_change_ip_seconds` need `change_ip_url_wo`, and
+  `locale` / `languages` refuse older language codes (`iw-IL`; use `he-IL`):
+  both would plan again after every apply.
 
 ## 0.11.0
 

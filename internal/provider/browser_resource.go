@@ -20,6 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"golang.org/x/text/language"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
@@ -82,7 +83,8 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"locale": schema.StringAttribute{
 				Optional: true,
 				Description: "The browser's language and region, e.g. \"ru-RU\": its pages, navigator.language and " +
-					"Intl. One of the locales GET /v1/browsers/locales lists. Changing it restarts the browser; " +
+					"Intl. One of the locales GET /v1/browsers/locales lists, in its current spelling (\"he-IL\", not \"iw-IL\"). " +
+					"Changing it restarts the browser; " +
 					"the profile is kept. Removing it puts the browser back to its default.",
 				Validators: []validator.String{stringvalidator.RegexMatches(localeRe,
 					"a language and region such as \"ru-RU\" or \"en-US\" (lowercase language, uppercase region)")},
@@ -199,12 +201,12 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 								},
 								"change_ip_method": schema.StringAttribute{
 									Optional:    true,
-									Description: "\"GET\" (the default) or \"POST\" for change_ip_url_wo.",
+									Description: "\"GET\" (the default) or \"POST\", with change_ip_url_wo only.",
 									Validators:  []validator.String{stringvalidator.OneOf("GET", "POST")},
 								},
 								"min_change_ip_seconds": schema.Int64Attribute{
 									Optional:    true,
-									Description: "The shortest time between two change-IP calls, 10 to 3600 seconds (default 60).",
+									Description: "The shortest time between two change-IP calls, 10 to 3600 seconds (default 60), with change_ip_url_wo only.",
 									Validators:  []validator.Int64{int64validator.Between(10, 3600)},
 								},
 								"has_auth": schema.BoolAttribute{
@@ -410,7 +412,12 @@ func (u upstreamModel) hasChangeIPURL() bool { return u.ChangeIPURLWO.ValueStrin
 // cfg is the configuration, the only place the write-only values are; state
 // is what Terraform holds now, nil on a create. A newer setting goes out only
 // when the plan has it or the state had it (then as its clear value), so a
-// browser without them sends exactly what it always did.
+// browser without them sends exactly what it always did. The state holds a
+// newer setting only while the configuration manages it (readBrowser), so a
+// setting made in the console for a browser whose configuration leaves it
+// out is never cleared. A proxy block the plan leaves as the state has it is
+// not sent at all: the platform keeps it, and an update that only changes cpu
+// is no proxy change.
 func browserSpec(ctx context.Context, plan, cfg browserModel, state *browserModel) map[string]any {
 	spec := map[string]any{}
 	if v := plan.CPU.ValueString(); v != "" {
@@ -463,7 +470,9 @@ func browserSpec(ctx context.Context, plan, cfg browserModel, state *browserMode
 		if state != nil {
 			prev = state.proxy(ctx)
 		}
-		spec["proxy"] = proxySpec(ctx, p, cfg.proxy(ctx), prev)
+		if prev == nil || !plan.Proxy.Equal(state.Proxy) {
+			spec["proxy"] = proxySpec(ctx, p, cfg.proxy(ctx), prev)
+		}
 	} else if state != nil && known(state.Proxy) {
 		spec["proxy"] = map[string]any{"remove": true}
 	}
@@ -476,7 +485,9 @@ func browserSpec(ctx context.Context, plan, cfg browserModel, state *browserMode
 // won't carry a login to another host) — and when auth_version changed.
 // Otherwise the upstream says it has them (hasAuth: true), which keeps what is
 // stored, so an update that only changes cpu sends no secret. An upstream
-// with none in the configuration says hasAuth: false, which removes it.
+// with none in the configuration says hasAuth: false, which removes it. An
+// upstream the configuration doesn't write (lifecycle ignore_changes) keeps
+// what is stored: it sends the flags planBrowser took from the state.
 func proxySpec(ctx context.Context, plan, cfg, prev *proxyModel) map[string]any {
 	resend := prev == nil || !plan.AuthVersion.Equal(prev.AuthVersion)
 	stored := upstreamsByName(prev.upstreams(ctx))
@@ -491,8 +502,14 @@ func proxySpec(ctx context.Context, plan, cfg, prev *proxyModel) map[string]any 
 		if known(u.MinChangeIPSeconds) {
 			e["minChangeIpSeconds"] = u.MinChangeIPSeconds.ValueInt64()
 		}
-		c := given[name]
+		c, written := given[name]
 		st, had := stored[name]
+		if keptUpstream(c, written) {
+			e["hasAuth"] = flagOf(u.HasAuth, st.HasAuth)
+			e["hasChangeIp"] = flagOf(u.HasChangeIP, st.HasChangeIP)
+			ups = append(ups, e)
+			continue
+		}
 		fresh := resend || !had || st.Server.ValueString() != u.Server.ValueString()
 		if c.hasLogin() {
 			if fresh || !st.HasAuth.ValueBool() {
@@ -535,10 +552,52 @@ func proxySpec(ctx context.Context, plan, cfg, prev *proxyModel) map[string]any 
 	return out
 }
 
+// keptUpstream: the configuration doesn't write this upstream itself. Either
+// it isn't there, or its has_auth / has_change_ip are set, which a written
+// configuration never does (they are read-only): Terraform copied the block
+// from the state for lifecycle ignore_changes. Such an upstream keeps what is
+// stored instead of losing it for want of write-only values.
+func keptUpstream(c upstreamModel, written bool) bool {
+	return !written || known(c.HasAuth) || known(c.HasChangeIP)
+}
+
+// flagOf is the first known of the planned and the stored flag, else false.
+func flagOf(vals ...types.Bool) bool {
+	for _, v := range vals {
+		if known(v) {
+			return v.ValueBool()
+		}
+	}
+	return false
+}
+
+// canonicalTag says how the platform spells a language tag when it isn't
+// spelled that way: older codes such as "iw-IL" are stored as "he-IL", and a
+// plan holding the old one would never settle.
+func canonicalTag(s string) (string, bool) {
+	t, err := language.Parse(s)
+	if err != nil || t.String() == s {
+		return "", false
+	}
+	return t.String(), true
+}
+
 // browserConfigErrors: what the configuration needs before any call. Unknown
 // values are left to apply.
 func browserConfigErrors(ctx context.Context, m browserModel) [][2]string {
 	var out [][2]string
+	if known(m.Locale) {
+		if c, ok := canonicalTag(m.Locale.ValueString()); ok {
+			out = append(out, [2]string{"Older language code",
+				fmt.Sprintf("locale %q is an older spelling; use %q.", m.Locale.ValueString(), c)})
+		}
+	}
+	for _, l := range m.languageList(ctx) {
+		if c, ok := canonicalTag(l); ok {
+			out = append(out, [2]string{"Older language code",
+				fmt.Sprintf("languages: %q is an older spelling; use %q.", l, c)})
+		}
+	}
 	if langs := m.languageList(ctx); len(langs) > 0 && known(m.Locale) && langs[0] != m.Locale.ValueString() {
 		out = append(out, [2]string{"languages must start with locale",
 			fmt.Sprintf("languages starts with %q; with locale = %q it must start with %q.", langs[0], m.Locale.ValueString(), m.Locale.ValueString())})
@@ -578,14 +637,22 @@ func browserConfigErrors(ctx context.Context, m browserModel) [][2]string {
 		}
 		seen[name] = true
 		if !proxyRe.MatchString(server) {
+			// The server isn't repeated: a login written into it would land
+			// in the plan's output.
 			out = append(out, [2]string{"Bad upstream server",
-				fmt.Sprintf("Upstream %q: %q should be scheme://host:port with scheme http, https or socks5, and no login, path or query (the login goes in username_wo and password_wo).", name, server)})
+				fmt.Sprintf("Upstream %q: the server should be scheme://host:port with scheme http, https or socks5, and no login, path or query (the login goes in username_wo and password_wo).", name)})
 		}
 		if !u.UsernameWO.IsUnknown() && !u.PasswordWO.IsUnknown() && (u.UsernameWO.ValueString() == "") != (u.PasswordWO.ValueString() == "") {
 			out = append(out, [2]string{"Incomplete upstream login", fmt.Sprintf("Upstream %q: set username_wo and password_wo together.", name)})
 		}
 		if v := u.ChangeIPURLWO; known(v) && !httpURLRe.MatchString(v.ValueString()) {
 			out = append(out, [2]string{"Bad change_ip_url_wo", fmt.Sprintf("Upstream %q: the change-IP address should start with http:// or https://.", name)})
+		}
+		// The platform keeps these only with a change-IP address; without
+		// one they would read back empty and plan again forever.
+		if u.ChangeIPURLWO.IsNull() && (known(u.ChangeIPMethod) || known(u.MinChangeIPSeconds)) {
+			out = append(out, [2]string{"change_ip_method needs change_ip_url_wo",
+				fmt.Sprintf("Upstream %q: change_ip_method and min_change_ip_seconds go with change_ip_url_wo.", name)})
 		}
 	}
 	if rot := p.rotation(ctx); rot != nil && !rot.Mode.IsUnknown() && !rot.EveryMinutes.IsUnknown() {
@@ -615,7 +682,9 @@ func (r *browserResource) ValidateConfig(ctx context.Context, req resource.Valid
 // languages left out (kept while locale stays, worked out again when it
 // changes, gone without locale) and each upstream's has_auth / has_change_ip
 // (true when the configuration gives the value, false when not, as proxySpec
-// sends). It returns the stored values this plan removes, for a warning.
+// sends). An upstream the configuration doesn't write itself (lifecycle
+// ignore_changes) keeps the stored flags. It returns the stored values this
+// plan removes, for a warning.
 func planBrowser(ctx context.Context, plan, cfg browserModel, state *browserModel) (browserModel, []string) {
 	if cfg.Languages.IsNull() {
 		switch {
@@ -633,6 +702,11 @@ func planBrowser(ctx context.Context, plan, cfg browserModel, state *browserMode
 	if p == nil || !known(p.Upstream) {
 		return plan, nil
 	}
+	if cfg.Proxy.IsNull() {
+		// A plan with a proxy the configuration doesn't have: it is the
+		// state's, kept by lifecycle ignore_changes. Nothing to work out.
+		return plan, nil
+	}
 	given := upstreamsByName(cfg.proxy(ctx).upstreams(ctx))
 	stored := map[string]upstreamModel{}
 	if state != nil {
@@ -641,7 +715,15 @@ func planBrowser(ctx context.Context, plan, cfg browserModel, state *browserMode
 	var removed []string
 	vals := []attr.Value{}
 	for _, u := range p.upstreams(ctx) {
-		c := given[u.Name.ValueString()]
+		c, written := given[u.Name.ValueString()]
+		if !u.Name.IsUnknown() && keptUpstream(c, written) {
+			st := stored[u.Name.ValueString()]
+			u.HasAuth = types.BoolValue(flagOf(c.HasAuth, st.HasAuth, u.HasAuth))
+			u.HasChangeIP = types.BoolValue(flagOf(c.HasChangeIP, st.HasChangeIP, u.HasChangeIP))
+			u.UsernameWO, u.PasswordWO, u.ChangeIPURLWO = types.StringNull(), types.StringNull(), types.StringNull()
+			vals = append(vals, upstreamObject(u))
+			continue
+		}
 		hasAuth := types.BoolValue(c.hasLogin())
 		hasCIP := types.BoolValue(c.hasChangeIPURL())
 		if c.UsernameWO.IsUnknown() || c.PasswordWO.IsUnknown() {
@@ -715,28 +797,49 @@ func (r *browserResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 // readBrowser maps the platform's browser block into the model. Values the
 // configuration left out read back as left out when the platform holds only
 // its default; the write-only values are never read back.
-func readBrowser(ctx context.Context, prev browserModel, sp map[string]any) browserModel {
+//
+// A newer setting (locale, timezone, languages, geolocation, proxy) is read
+// only while the state holds it, that is while the configuration manages it,
+// or when all is set (an import). A configuration that leaves one out leaves
+// it to the console: what a person sets there is kept, never planned away,
+// and an update sends nothing for it.
+func readBrowser(ctx context.Context, prev browserModel, sp map[string]any, all bool) browserModel {
 	m := prev
-	m.Locale = readSetting(sp["locale"])
-	m.Timezone = readSetting(sp["timezone"])
-	if raw, _ := sp["languages"].([]any); len(raw) > 0 {
-		vals := make([]attr.Value, 0, len(raw))
-		for _, l := range raw {
-			if s, ok := l.(string); ok {
-				vals = append(vals, types.StringValue(s))
-			}
-		}
-		m.Languages = types.ListValueMust(types.StringType, vals)
-	} else {
-		m.Languages = types.ListNull(types.StringType)
+	if all || known(prev.Locale) {
+		m.Locale = readSetting(sp["locale"])
 	}
-	m.Geolocation = readGeo(prev.geo(ctx), sp["geolocation"])
-	m.Proxy = readProxy(ctx, prev.proxy(ctx), sp["proxy"])
+	if all || known(prev.Timezone) {
+		m.Timezone = readSetting(sp["timezone"])
+	}
+	if all || known(prev.Languages) || known(prev.Locale) {
+		m.Languages = readLanguages(sp["languages"])
+	}
+	if all || known(prev.Geolocation) {
+		m.Geolocation = readGeo(prev.geo(ctx), sp["geolocation"])
+	}
+	if all || known(prev.Proxy) {
+		m.Proxy = readProxy(ctx, prev.proxy(ctx), sp["proxy"])
+	}
 	if b, ok := sp["profilesReady"].(bool); ok {
 		m.ProfilesReady = types.BoolValue(b)
 	}
 	refreshPlacement(sp, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	return m
+}
+
+// readLanguages: the platform's languages, null when it holds none.
+func readLanguages(v any) types.List {
+	raw, _ := v.([]any)
+	if len(raw) == 0 {
+		return types.ListNull(types.StringType)
+	}
+	vals := make([]attr.Value, 0, len(raw))
+	for _, l := range raw {
+		if s, ok := l.(string); ok {
+			vals = append(vals, types.StringValue(s))
+		}
+	}
+	return types.ListValueMust(types.StringType, vals)
 }
 
 // readSetting: a string setting, null when the platform holds none.
@@ -880,7 +983,7 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel) browse
 	var fromSpec *bool
 	if ws, err := r.data.Client.Workloads(ctx); err == nil {
 		if w := findWorkload(ws, plan.Name.ValueString()); w != nil {
-			read := readBrowser(ctx, plan, w.Browser)
+			read := readBrowser(ctx, plan, w.Browser, true)
 			if plan.Languages.IsUnknown() {
 				m.Languages = read.Languages
 			}
@@ -966,7 +1069,12 @@ func (r *browserResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.State.RemoveResource(ctx)
 		return
 	}
-	state = readBrowser(ctx, state, w.Browser)
+	imported := false
+	if b, d := req.Private.GetKey(ctx, importedKey); !d.HasError() && len(b) > 0 {
+		imported = true
+		resp.Diagnostics.Append(resp.Private.SetKey(ctx, importedKey, nil)...)
+	}
+	state = readBrowser(ctx, state, w.Browser, imported)
 	st, _ := statusOf(ctx, r.data.Client, state.Name.ValueString())
 	state.Ready = types.BoolValue(st != nil && st.Ready)
 	var fromSpec *bool
@@ -1024,6 +1132,11 @@ func (r *browserResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 }
 
+// importedKey marks a state just imported: its first read takes every
+// setting the platform holds, so the plan shows what the configuration lacks.
+const importedKey = "imported"
+
 func (r *browserResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
+	resp.Diagnostics.Append(resp.Private.SetKey(ctx, importedKey, []byte(`true`))...)
 }

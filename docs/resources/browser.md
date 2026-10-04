@@ -86,8 +86,9 @@ on offer are listed at `GET /v1/browsers/locales`.
 - Adding the `proxy` block restarts the browser once. After that, changing
   upstreams, logins or rotation does not restart it. Removing the block
   restarts it again.
-- A `proxy` block with no `upstream` sends the browser straight out, without
-  a restart.
+- Adding the block restarts the browser even when it has no `upstream`. Once
+  the block is there, emptying it (no `upstream`) sends the browser straight
+  out without a restart.
 - When an upstream can't be reached, page loads fail. The browser never falls
   back to going out directly. With rotation on, it moves to the next upstream.
 - Rotating drops open connections, and pages reconnect. One browser has one
@@ -101,6 +102,16 @@ on offer are listed at `GET /v1/browsers/locales`.
   permission, which a person turns on on the Keys page. Without it, a plan
   that changes the proxy fails at apply with the platform's message. An update
   that leaves the proxy alone, such as a new `cpu`, still works.
+
+### Settings made in the console
+
+A setting the configuration leaves out (`locale`, `timezone`, `languages`,
+`geolocation`, `proxy`) is left to the console: what a person or an agent sets
+there is kept, doesn't show in the plan, and an update doesn't touch it. Once
+the configuration sets one, Terraform manages it: a change made in the console
+shows in the plan, and removing it from the configuration puts the browser
+back to its default. To keep a proxy managed in the console, logins
+included, use `lifecycle { ignore_changes = [proxy] }`.
 
 ### Write-only values
 
@@ -127,8 +138,8 @@ is stored for it, and the plan warns about that.
 - `cpu` (String) CPU request, e.g. `1`.
 - `memory` (String) Memory request, e.g. `2Gi`.
 - `locale` (String) The browser's language and region, e.g. `ru-RU`, used for
-  its pages, `navigator.language` and `Intl`. Removing it puts the browser
-  back to its default.
+  its pages, `navigator.language` and `Intl`. Use current codes (`he-IL`, not
+  `iw-IL`). Removing it puts the browser back to its default.
 - `timezone` (String) An IANA time zone such as `Europe/Moscow`, or `UTC`.
 - `languages` (List of String) The languages pages are asked for
   (`Accept-Language`, `navigator.languages`), in order, 1 to 6. With `locale`
@@ -154,9 +165,10 @@ is stored for it, and the plan warns about that.
     - `change_ip_url_wo` (String, Sensitive, write-only) A mobile proxy's
       change-IP address. It is called before the browser rotates to this
       upstream.
-    - `change_ip_method` (String) `GET` (default) or `POST`.
+    - `change_ip_method` (String) `GET` (default) or `POST`. Only with
+      `change_ip_url_wo`.
     - `min_change_ip_seconds` (Number) The shortest time between two change-IP
-      calls, 10 to 3600 seconds (default 60).
+      calls, 10 to 3600 seconds (default 60). Only with `change_ip_url_wo`.
     - `has_auth`, `has_change_ip` (Boolean, read-only) Whether a login or a
       change-IP address is stored. They are planned from the configuration.
   - `auth_version` (Number) Change it to send the write-only values again.
@@ -189,7 +201,8 @@ show them.
 terraform import livellm_browser.scraper scraper
 ```
 
-The write-only values can't be imported, and neither can `auth_version`, which
+An import reads every setting the browser holds, so the first plan shows the
+ones the configuration lacks. The write-only values can't be imported, and neither can `auth_version`, which
 the platform doesn't keep. When the configuration sets `auth_version`, the
 first plan after an import sets it, and that apply sends the configuration's
 values.

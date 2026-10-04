@@ -357,7 +357,7 @@ func TestReadBrowserRoundTrip(t *testing.T) {
 			"rotation": {"mode": "session", "order": "sequential"}
 		}
 	}`), &api)
-	got := readBrowser(ctx, st, api)
+	got := readBrowser(ctx, st, api, false)
 	for name, pair := range map[string][2]attr.Value{
 		"locale": {got.Locale, st.Locale}, "timezone": {got.Timezone, st.Timezone}, "languages": {got.Languages, st.Languages},
 		"geolocation": {got.Geolocation, st.Geolocation}, "proxy": {got.Proxy, st.Proxy}, "profiles_ready": {got.ProfilesReady, st.ProfilesReady},
@@ -372,7 +372,7 @@ func TestReadBrowserRoundTrip(t *testing.T) {
 	json.Unmarshal([]byte(`{"proxy": {"upstreams": [
 		{"name": "a", "server": "http://a.example.com:3128", "changeIpMethod": "POST"},
 		{"name": "b", "server": "socks5://b.example.com:1080", "hasAuth": false, "hasChangeIp": true}]}}`), &api)
-	got = readBrowser(ctx, st, api)
+	got = readBrowser(ctx, st, api, false)
 	ups := got.proxy(ctx).upstreams(ctx)
 	if ups[0].ChangeIPMethod.ValueString() != "POST" || ups[1].HasAuth.ValueBool() || !got.Locale.IsNull() {
 		t.Errorf("console change not read: %+v locale %v", ups, got.Locale)
@@ -384,12 +384,12 @@ func TestReadBrowserRoundTrip(t *testing.T) {
 	// Import: nothing in state, the platform holds a proxy with defaults only.
 	api = nil
 	json.Unmarshal([]byte(`{"proxy": {"upstreams": [], "rotation": {"mode": "off", "order": "sequential"}}}`), &api)
-	imp := readBrowser(ctx, baseBrowser(), api)
+	imp := readBrowser(ctx, baseBrowser(), api, true)
 	p := imp.proxy(ctx)
 	if p == nil || !p.Upstream.IsNull() || !p.Rotation.IsNull() || !p.CheckURL.IsNull() {
 		t.Errorf("import: %v", imp.Proxy)
 	}
-	if imp = readBrowser(ctx, baseBrowser(), map[string]any{}); !imp.Proxy.IsNull() || !imp.Geolocation.IsNull() {
+	if imp = readBrowser(ctx, baseBrowser(), map[string]any{}, true); !imp.Proxy.IsNull() || !imp.Geolocation.IsNull() {
 		t.Errorf("nothing held: %v %v", imp.Proxy, imp.Geolocation)
 	}
 }
@@ -470,6 +470,26 @@ func TestBrowserConfigErrors(t *testing.T) {
 		{"minutes without interval", func(m *browserModel) {
 			m.Proxy = proxyOf(types.Int64Null(), rot("session", 5), up("a", "http://a.example.com:3128", false, false))
 		}, "goes with interval"},
+		{"change_ip_method without change_ip_url_wo", func(m *browserModel) {
+			u := up("a", "http://a.example.com:3128", false, false)
+			u.ChangeIPMethod = types.StringValue("POST")
+			m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), u)
+		}, "needs change_ip_url_wo"},
+		{"min_change_ip_seconds without change_ip_url_wo", func(m *browserModel) {
+			u := up("a", "http://a.example.com:3128", true, false)
+			u.MinChangeIPSeconds = types.Int64Value(30)
+			m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), u)
+		}, "needs change_ip_url_wo"},
+		{"change_ip_method with an address not known yet", func(m *browserModel) {
+			u := up("a", "http://a.example.com:3128", false, false)
+			u.ChangeIPMethod, u.ChangeIPURLWO = types.StringValue("POST"), types.StringUnknown()
+			m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), u)
+		}, ""},
+		{"older locale code", func(m *browserModel) { m.Locale = types.StringValue("iw-IL") }, "Older language code"},
+		{"older language code", func(m *browserModel) {
+			m.Locale = types.StringValue("he-IL")
+			m.Languages = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("he-IL"), types.StringValue("iw")})
+		}, "Older language code"},
 		{"full proxy", func(m *browserModel) {
 			m.Proxy = proxyOf(types.Int64Value(1), rot("interval", 5),
 				up("a", "https://a.example.com:443", true, true), up("b", "socks5://[2001:db8::1]:1080", false, false))
@@ -484,6 +504,22 @@ func TestBrowserConfigErrors(t *testing.T) {
 			t.Errorf("%s: unexpected %v", c.name, errs)
 		case c.want != "" && (len(errs) == 0 || !strings.Contains(errs[0][0], c.want)):
 			t.Errorf("%s: got %v, want %q", c.name, errs, c.want)
+		}
+	}
+	// A login written into the server never reaches the diagnostic.
+	leak := baseBrowser()
+	leak.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), up("a", "socks5://user:S3cret@a.example.com:1080", false, false))
+	if errs := browserConfigErrors(ctx, leak); len(errs) != 1 || strings.Contains(errs[0][1], "S3cret") || strings.Contains(errs[0][1], "user:") {
+		t.Errorf("server with a login: %v", errs)
+	}
+	for _, ok := range []string{"en-US", "pt-BR", "zh-TW", "zh-Hant-TW", "es-419", "nb-NO", "he-IL", "id-ID", "fil"} {
+		if _, older := canonicalTag(ok); older {
+			t.Errorf("%q called an older spelling", ok)
+		}
+	}
+	for old, want := range map[string]string{"iw-IL": "he-IL", "in-ID": "id-ID", "tl": "fil", "iw": "he"} {
+		if got, older := canonicalTag(old); !older || got != want {
+			t.Errorf("%q: %q %v, want %q", old, got, older, want)
 		}
 	}
 	for _, ok := range []string{"ru-RU", "en-US", "es-419", "kk-KZ"} {
@@ -527,5 +563,104 @@ func TestProxyRefusalDiagnostic(t *testing.T) {
 	apiDiag(&diags, "x", errors.New("boom"))
 	if len(diags) != 1 || diags[0].Summary() != "x" {
 		t.Errorf("plain error: %v", diags)
+	}
+}
+
+// A configuration without the newer settings leaves them to the console:
+// a locale, a time zone, a geolocation and a proxy a person set there are not
+// read into state, plan nothing, and an update sends only what 0.11.0 sent,
+// so a key without the proxies permission can still change cpu.
+func TestConsoleSettingsKeptWithoutConfiguration(t *testing.T) {
+	ctx := context.Background()
+	m := baseBrowser()
+	m.CPU = types.StringValue("1")
+	st := stored(t, m, nil)
+
+	var api map[string]any
+	json.Unmarshal([]byte(`{
+		"cpu": "1", "locale": "ru-RU", "timezone": "Europe/Moscow", "languages": ["ru-RU","ru","en-US","en"],
+		"geolocation": {"mode": "off"}, "profilesReady": true,
+		"proxy": {"upstreams": [{"name": "a", "server": "http://a.example.com:3128", "hasAuth": true, "hasChangeIp": false}],
+			"rotation": {"mode": "off", "order": "sequential"}}
+	}`), &api)
+	read := readBrowser(ctx, st, api, false)
+	for name, v := range map[string]attr.Value{"locale": read.Locale, "timezone": read.Timezone,
+		"languages": read.Languages, "geolocation": read.Geolocation, "proxy": read.Proxy} {
+		if !v.IsNull() {
+			t.Errorf("%s read into state: %v", name, v)
+		}
+	}
+	plan, removed := planBrowser(ctx, m, m, &read)
+	if len(removed) != 0 {
+		t.Errorf("removes %v", removed)
+	}
+	upd := plan
+	upd.CPU = types.StringValue("2")
+	if got := browserSpec(ctx, upd, upd, &read); !reflect.DeepEqual(got, map[string]any{"cpu": "2"}) {
+		t.Errorf("cpu-only update sent %s", specJSON(t, got))
+	}
+
+	// An import reads them all, so the plan shows what the configuration lacks.
+	imp := readBrowser(ctx, baseBrowser(), api, true)
+	if imp.Locale.ValueString() != "ru-RU" || imp.Proxy.IsNull() || imp.Geolocation.IsNull() || imp.Languages.IsNull() {
+		t.Errorf("import: %+v", imp)
+	}
+	// A managed setting the console cleared reads back empty: the plan puts it back.
+	managed := st
+	managed.Locale = types.StringValue("ru-RU")
+	if got := readBrowser(ctx, managed, map[string]any{}, false); !got.Locale.IsNull() {
+		t.Errorf("cleared locale reads %v", got.Locale)
+	}
+}
+
+// lifecycle { ignore_changes = [proxy] }: Terraform hands the provider the
+// state's proxy as the configuration (read-only flags set, write-only values
+// empty), or no proxy at all. Either way the stored logins stay, the plan is
+// clean, and an update sends no proxy.
+func TestIgnoredProxyKeepsStoredValues(t *testing.T) {
+	ctx := context.Background()
+	m := baseBrowser()
+	m.CPU = types.StringValue("1")
+	m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes),
+		up("a", "http://a.example.com:3128", true, true), up("b", "http://b.example.com:3128", false, false))
+	st := stored(t, m, nil)
+
+	copied := st // the configuration Terraform builds under ignore_changes
+	copied.CPU = types.StringValue("2")
+	plan, removed := planBrowser(ctx, copied, copied, &st)
+	if len(removed) != 0 {
+		t.Errorf("removes %v", removed)
+	}
+	if !plan.Proxy.Equal(st.Proxy) {
+		t.Errorf("plan changes the proxy:\n plan  %v\n state %v", plan.Proxy, st.Proxy)
+	}
+	if got := browserSpec(ctx, plan, copied, &st); got["proxy"] != nil {
+		t.Errorf("update sent the proxy: %s", specJSON(t, got))
+	}
+
+	noCfg := baseBrowser() // the other shape: no proxy in the configuration
+	noCfg.CPU = types.StringValue("2")
+	planned := copied
+	plan, removed = planBrowser(ctx, planned, noCfg, &st)
+	if len(removed) != 0 || !plan.Proxy.Equal(st.Proxy) {
+		t.Errorf("no proxy in the configuration: removed %v plan %v", removed, plan.Proxy)
+	}
+	if got := browserSpec(ctx, plan, noCfg, &st); got["proxy"] != nil {
+		t.Errorf("update sent the proxy: %s", specJSON(t, got))
+	}
+
+	// Only the upstreams ignored, the rotation written: the flags are kept and sent.
+	partial := copied
+	partial.Proxy = proxyOf(types.Int64Null(), types.ObjectValueMust(rotationAttrTypes, map[string]attr.Value{
+		"mode": types.StringValue("interval"), "every_minutes": types.Int64Value(5), "order": types.StringNull(),
+	}), st.proxy(ctx).upstreams(ctx)...)
+	plan, removed = planBrowser(ctx, partial, partial, &st)
+	if len(removed) != 0 {
+		t.Errorf("partial removes %v", removed)
+	}
+	got := browserSpec(ctx, plan, partial, &st)
+	ups := got["proxy"].(map[string]any)["upstreams"].([]map[string]any)
+	if ups[0]["hasAuth"] != true || ups[0]["hasChangeIp"] != true || ups[1]["hasAuth"] != false || ups[0]["username"] != nil {
+		t.Errorf("partial: %s", specJSON(t, got))
 	}
 }
