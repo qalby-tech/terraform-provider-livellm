@@ -34,6 +34,12 @@
 - `change_ip_method` and `min_change_ip_seconds` need `change_ip_url_wo`, and
   `locale` / `languages` refuse older language codes (`iw-IL`; use `he-IL`):
   both would plan again after every apply.
+- Refused at plan, as the platform refuses them at apply: `languages` without
+  `locale`; a `check_url` with a login, or a token, key, password or signature
+  in its query (everyone in the workspace sees it; the address isn't repeated
+  in the error); an upstream `server` on this machine (`localhost`, loopback
+  or link-local); a `username_wo` / `password_wo` longer than 255 characters or
+  on more than one line (the value isn't repeated).
 
 ## 0.11.0
 

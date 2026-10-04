@@ -441,6 +441,22 @@ func TestBrowserConfigErrors(t *testing.T) {
 			m.Locale = types.StringValue("ru-RU")
 			m.Languages = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("en")})
 		}, "languages must start with locale"},
+		{"languages without locale", func(m *browserModel) {
+			m.Languages = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("ru-RU"), types.StringValue("en")})
+		}, "languages need locale"},
+		{"languages with a locale not known yet", func(m *browserModel) {
+			m.Locale = types.StringUnknown()
+			m.Languages = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("ru-RU")})
+		}, ""},
+		{"server on this machine", func(m *browserModel) {
+			m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), up("a", "socks5://127.0.0.1:1080", false, false))
+		}, "Bad upstream server"},
+		{"server on localhost", func(m *browserModel) {
+			m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), up("a", "http://localhost:3128", false, false))
+		}, "Bad upstream server"},
+		{"server on the link", func(m *browserModel) {
+			m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), up("a", "http://[fe80::1]:3128", false, false))
+		}, "Bad upstream server"},
 		{"geo without mode", func(m *browserModel) { m.Geolocation = geo("", false, false) }, "needs a mode"},
 		{"geo fixed without place", func(m *browserModel) { m.Geolocation = geo("fixed", true, false) }, "needs a place"},
 		{"geo off with place", func(m *browserModel) { m.Geolocation = geo("off", true, true) }, "takes no place"},
@@ -541,6 +557,105 @@ func TestBrowserConfigErrors(t *testing.T) {
 		if timezoneRe.MatchString(bad) {
 			t.Errorf("time zone %q accepted", bad)
 		}
+	}
+}
+
+// languages without locale is refused at plan, in words that say what to do,
+// and only that: the platform answers 422 to such a body.
+func TestLanguagesNeedLocale(t *testing.T) {
+	ctx := context.Background()
+	m := baseBrowser()
+	m.Languages = types.ListValueMust(types.StringType, []attr.Value{types.StringValue("ru-RU"), types.StringValue("en")})
+	errs := browserConfigErrors(ctx, m)
+	if len(errs) != 1 || errs[0][0] != "languages need locale" || !strings.Contains(errs[0][1], "Set locale too") {
+		t.Fatalf("languages without locale: %v", errs)
+	}
+	// The same through ValidateConfig, the plan-time path.
+	m.Locale = types.StringValue("ru-RU")
+	if errs := browserConfigErrors(ctx, m); len(errs) != 0 {
+		t.Errorf("with locale: %v", errs)
+	}
+}
+
+// check_url: the platform's own vectors. A refused address is never repeated
+// in the diagnostic.
+func TestCheckURLCredential(t *testing.T) {
+	ctx := context.Background()
+	refused := []string{
+		"https://ip.example.com/?token=x",
+		"https://ip.example.com/?KEY=",
+		"https://ip.example.com/?a=1;secret=2",
+		"https://u:p@ip.example.com/",
+		"https://ip.example.com/?%74oken=zz",
+		"https://ip.example.com/?format=json&api_key",
+		"https://ip.example.com/?Access_Token=t1",
+		"https://ip.example.com/?sig=abc&x=1",
+	}
+	allowed := []string{
+		"https://api.ipify.org?format=json",
+		"https://ip.example.com/key/token",
+		"https://ip.example.com/?keyless=1&tokens=2&passage=3&monkey=4",
+		"http://ip.example.com",
+	}
+	withCheck := func(u string) browserModel {
+		m := baseBrowser()
+		var p proxyModel
+		proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), up("a", "http://a.example.com:3128", false, false)).As(ctx, &p, objectAsOpts)
+		p.CheckURL = types.StringValue(u)
+		m.Proxy = proxyObject(p)
+		return m
+	}
+	for _, u := range refused {
+		if !checkURLCarriesCredential(u) {
+			t.Errorf("%q not refused", u)
+		}
+		errs := browserConfigErrors(ctx, withCheck(u))
+		if len(errs) != 1 || errs[0][0] != "check_url can't carry a credential" {
+			t.Errorf("%q: %v", u, errs)
+			continue
+		}
+		if strings.Contains(errs[0][1], "ip.example.com") || strings.Contains(errs[0][1], u) {
+			t.Errorf("%q repeated in %q", u, errs[0][1])
+		}
+	}
+	for _, u := range allowed {
+		if checkURLCarriesCredential(u) {
+			t.Errorf("%q refused", u)
+		}
+		if errs := browserConfigErrors(ctx, withCheck(u)); len(errs) != 0 {
+			t.Errorf("%q: %v", u, errs)
+		}
+	}
+	// Not known yet: left to apply.
+	m := baseBrowser()
+	var p proxyModel
+	proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), up("a", "http://a.example.com:3128", false, false)).As(ctx, &p, objectAsOpts)
+	p.CheckURL = types.StringUnknown()
+	m.Proxy = proxyObject(p)
+	if errs := browserConfigErrors(ctx, m); len(errs) != 0 {
+		t.Errorf("unknown check_url: %v", errs)
+	}
+}
+
+// A login the platform would refuse is caught at plan and never repeated.
+func TestUpstreamLoginShape(t *testing.T) {
+	ctx := context.Background()
+	for _, bad := range []string{strings.Repeat("x", 256), "two\nlines", "nul\x00"} {
+		u := up("a", "http://a.example.com:3128", true, false)
+		u.PasswordWO = types.StringValue(bad)
+		m := baseBrowser()
+		m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), u)
+		errs := browserConfigErrors(ctx, m)
+		if len(errs) != 1 || errs[0][0] != "Bad upstream login" || !strings.Contains(errs[0][1], "password_wo") || strings.Contains(errs[0][1], bad) {
+			t.Errorf("%q: %v", bad, errs)
+		}
+	}
+	u := up("a", "http://a.example.com:3128", true, false)
+	u.UsernameWO = types.StringValue(strings.Repeat("u", 255))
+	m := baseBrowser()
+	m.Proxy = proxyOf(types.Int64Null(), types.ObjectNull(rotationAttrTypes), u)
+	if errs := browserConfigErrors(ctx, m); len(errs) != 0 {
+		t.Errorf("255 characters: %v", errs)
 	}
 }
 

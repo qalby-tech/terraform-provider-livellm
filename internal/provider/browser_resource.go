@@ -3,7 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -47,7 +50,58 @@ var (
 	timezoneRe = regexp.MustCompile(`^(UTC|[A-Za-z_]+(/[A-Za-z0-9_+\-]+){1,2})$`)
 	proxyRe    = regexp.MustCompile(`^(http|https|socks5)://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?):[0-9]{1,5}$`)
 	httpURLRe  = regexp.MustCompile(`^https?://[^\s/?#]+\S*$`)
+	// The platform refuses a check address whose query matches this (its
+	// own pattern), as well as the keys below with no value.
+	checkURLSecretRe = regexp.MustCompile(`(?i)[?&](token|key|apikey|api_key|access_token|secret|password|pass|auth|sig|signature)=`)
 )
+
+// checkURLSecretKeys are the query keys the platform takes for a credential.
+var checkURLSecretKeys = map[string]bool{
+	"token": true, "key": true, "apikey": true, "api_key": true, "access_token": true, "secret": true,
+	"password": true, "pass": true, "auth": true, "sig": true, "signature": true,
+}
+
+// checkURLCarriesCredential says a check address has a login, or a query key
+// that carries one (token, key, password, signature, ..., in any case, with
+// or without a value), as the platform decides it: the address is shown to
+// everyone in the workspace, so it refuses both.
+func checkURLCarriesCredential(s string) bool {
+	if checkURLSecretRe.MatchString(s) {
+		return true
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return true
+	}
+	if u.User != nil {
+		return true
+	}
+	for _, pair := range strings.FieldsFunc(u.RawQuery, func(r rune) bool { return r == '&' || r == ';' }) {
+		k, _, _ := strings.Cut(pair, "=")
+		if dk, err := url.QueryUnescape(k); err == nil {
+			k = dk
+		}
+		if checkURLSecretKeys[strings.ToLower(strings.TrimSpace(k))] {
+			return true
+		}
+	}
+	return false
+}
+
+// proxyHostIsLocal says a proxy server names this machine or the link, which
+// the platform refuses.
+func proxyHostIsLocal(server string) bool {
+	u, err := url.Parse(server)
+	if err != nil {
+		return false
+	}
+	h := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && (ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified())
+}
 
 // The platform's defaults: a value the configuration left out reads back as
 // left out when the platform holds just its default.
@@ -101,7 +155,7 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 				ElementType: types.StringType,
 				Description: "The languages pages are asked for (Accept-Language, navigator.languages), in order; " +
-					"the first is locale when locale is set. Left out, it follows locale (\"ru-RU\" gives " +
+					"the first is locale, and they need locale (the platform refuses them without it). Left out, it follows locale (\"ru-RU\" gives " +
 					"ru-RU, ru, en-US, en). Removing it from the configuration keeps the current list until locale changes.",
 				Validators: []validator.List{
 					listvalidator.SizeBetween(1, 6),
@@ -161,7 +215,8 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					"check_url": schema.StringAttribute{
 						Optional: true,
 						Description: "An http(s) address that answers the caller's IP, as text or JSON with \"ip\", " +
-							"fetched through the proxy to see the exit address. Left out, LiveLLM's own.",
+							"fetched through the proxy to see the exit address. Left out, LiveLLM's own. Everyone in the " +
+							"workspace sees it, so it can't carry a login, or a token, key, password or signature in its query.",
 						Validators: []validator.String{stringvalidator.RegexMatches(httpURLRe, "an http:// or https:// address")},
 					},
 				},
@@ -178,19 +233,19 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 								},
 								"server": schema.StringAttribute{
 									Optional:    true,
-									Description: "scheme://host:port, scheme http, https or socks5; no login, path or query in it.",
+									Description: "scheme://host:port, scheme http, https or socks5; no login, path or query in it, and not this machine (localhost, a loopback or link-local address).",
 								},
 								"username_wo": schema.StringAttribute{
 									Optional:    true,
 									WriteOnly:   true,
 									Sensitive:   true,
-									Description: "The proxy's username, write-only: never stored in state. Set with password_wo.",
+									Description: "The proxy's username (one line, at most 255 characters), write-only: never stored in state. Set with password_wo.",
 								},
 								"password_wo": schema.StringAttribute{
 									Optional:    true,
 									WriteOnly:   true,
 									Sensitive:   true,
-									Description: "The proxy's password, write-only: never stored in state. Set with username_wo.",
+									Description: "The proxy's password (one line, at most 255 characters), write-only: never stored in state. Set with username_wo.",
 								},
 								"change_ip_url_wo": schema.StringAttribute{
 									Optional:  true,
@@ -598,6 +653,12 @@ func browserConfigErrors(ctx context.Context, m browserModel) [][2]string {
 				fmt.Sprintf("languages: %q is an older spelling; use %q.", l, c)})
 		}
 	}
+	// The platform refuses languages without a locale (the first language is
+	// the locale). A locale not known yet is left to apply.
+	if langs := m.languageList(ctx); len(langs) > 0 && m.Locale.IsNull() {
+		out = append(out, [2]string{"languages need locale",
+			"languages is set without locale. Set locale too (the first language is the locale), or remove languages: left out, they follow locale."})
+	}
 	if langs := m.languageList(ctx); len(langs) > 0 && known(m.Locale) && langs[0] != m.Locale.ValueString() {
 		out = append(out, [2]string{"languages must start with locale",
 			fmt.Sprintf("languages starts with %q; with locale = %q it must start with %q.", langs[0], m.Locale.ValueString(), m.Locale.ValueString())})
@@ -642,6 +703,21 @@ func browserConfigErrors(ctx context.Context, m browserModel) [][2]string {
 			out = append(out, [2]string{"Bad upstream server",
 				fmt.Sprintf("Upstream %q: the server should be scheme://host:port with scheme http, https or socks5, and no login, path or query (the login goes in username_wo and password_wo).", name)})
 		}
+		if proxyRe.MatchString(server) && proxyHostIsLocal(server) {
+			out = append(out, [2]string{"Bad upstream server",
+				fmt.Sprintf("Upstream %q: the server can't be this machine (localhost, a loopback or link-local address).", name)})
+		}
+		for _, f := range []struct {
+			field string
+			v     types.String
+		}{{"username_wo", u.UsernameWO}, {"password_wo", u.PasswordWO}} {
+			// The value is never repeated: it is a secret.
+			field, v := f.field, f.v
+			if known(v) && (len(v.ValueString()) > 255 || strings.ContainsAny(v.ValueString(), "\r\n\x00")) {
+				out = append(out, [2]string{"Bad upstream login",
+					fmt.Sprintf("Upstream %q: %s must be one line of at most 255 characters.", name, field)})
+			}
+		}
 		if !u.UsernameWO.IsUnknown() && !u.PasswordWO.IsUnknown() && (u.UsernameWO.ValueString() == "") != (u.PasswordWO.ValueString() == "") {
 			out = append(out, [2]string{"Incomplete upstream login", fmt.Sprintf("Upstream %q: set username_wo and password_wo together.", name)})
 		}
@@ -654,6 +730,11 @@ func browserConfigErrors(ctx context.Context, m browserModel) [][2]string {
 			out = append(out, [2]string{"change_ip_method needs change_ip_url_wo",
 				fmt.Sprintf("Upstream %q: change_ip_method and min_change_ip_seconds go with change_ip_url_wo.", name)})
 		}
+	}
+	// The address is never repeated: what makes it refused is a credential.
+	if known(p.CheckURL) && checkURLCarriesCredential(p.CheckURL.ValueString()) {
+		out = append(out, [2]string{"check_url can't carry a credential",
+			"check_url has a login, or a token, key, password or signature in its query. Everyone in the workspace sees the address: use one that needs none."})
 	}
 	if rot := p.rotation(ctx); rot != nil && !rot.Mode.IsUnknown() && !rot.EveryMinutes.IsUnknown() {
 		interval := rot.Mode.ValueString() == "interval"

@@ -142,8 +142,8 @@ is stored for it, and the plan warns about that.
   `iw-IL`). Removing it puts the browser back to its default.
 - `timezone` (String) An IANA time zone such as `Europe/Moscow`, or `UTC`.
 - `languages` (List of String) The languages pages are asked for
-  (`Accept-Language`, `navigator.languages`), in order, 1 to 6. With `locale`
-  set, the first must be `locale`. Left out, it follows `locale`: `ru-RU`
+  (`Accept-Language`, `navigator.languages`), in order, 1 to 6. They need
+  `locale`, and the first must be `locale`. Left out, it follows `locale`: `ru-RU`
   gives `ru-RU, ru, en-US, en`. Removing it from the configuration keeps the
   current list until `locale` changes.
 - `geolocation` (Block) What pages get when they ask for a location. Left out,
@@ -159,9 +159,10 @@ is stored for it, and the plan warns about that.
     - `name` (String, required in the block) Lowercase letters, digits and
       dashes, unique in the list.
     - `server` (String, required in the block) `scheme://host:port` with scheme
-      `http`, `https` or `socks5`. No login, path or query.
+      `http`, `https` or `socks5`. No login, path or query, and not this
+      machine (`localhost`, a loopback or link-local address).
     - `username_wo`, `password_wo` (String, Sensitive, write-only) The proxy's
-      login. Set both or neither.
+      login, one line of at most 255 characters each. Set both or neither.
     - `change_ip_url_wo` (String, Sensitive, write-only) A mobile proxy's
       change-IP address. It is called before the browser rotates to this
       upstream.
@@ -178,7 +179,9 @@ is stored for it, and the plan warns about that.
     - `order` (String) `sequential` (default) or `random`.
   - `check_url` (String) An http(s) address that answers with the caller's IP,
     as plain text or as JSON with `ip`. It is fetched through the proxy to find
-    the exit address. Left out, LiveLLM uses its own.
+    the exit address. Left out, LiveLLM uses its own. Everyone in the workspace
+    sees it, so it can't carry a login, or a token, key, password or signature
+    in its query.
 - `timeouts` (Block) `create` / `delete` (default 10m each).
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
