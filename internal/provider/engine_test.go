@@ -153,7 +153,7 @@ func TestEngineSchema(t *testing.T) {
 
 // A Browser API holds browsers of either engine and has no engine of its own:
 // an engine argument on livellm_browser_api fails at plan as an unexpected
-// argument, and no body it sends carries one.
+// argument (the schema and the model have none, so no body can carry one).
 func TestBrowserAPIHasNoEngine(t *testing.T) {
 	ctx := context.Background()
 	var resp resource.SchemaResponse
@@ -164,6 +164,12 @@ func TestBrowserAPIHasNoEngine(t *testing.T) {
 	if _, ok := reflect.TypeOf(browserAPIModel{}).FieldByName("Engine"); ok {
 		t.Error("browserAPIModel has an Engine field")
 	}
+	if d := resp.Schema.Attributes["browsers"].(schema.SetAttribute).Description; !strings.Contains(d, "Chrome or Camoufox") {
+		t.Errorf("browsers description: %q", d)
+	}
+	if d := resp.Schema.Blocks["remote_browser"].(schema.ListNestedBlock).Description; !strings.HasPrefix(d, "A Chrome browser") {
+		t.Errorf("remote_browser description: %q", d)
+	}
 	all := resp.Schema.Attributes["all_browsers"].(schema.BoolAttribute).Description
 	if !strings.Contains(all, "every browser in the workspace") || strings.Contains(all, "of its engine") {
 		t.Errorf("all_browsers description: %q", all)
@@ -173,9 +179,6 @@ func TestBrowserAPIHasNoEngine(t *testing.T) {
 	m.RemoteBrowser = remoteList(t, [3]string{"office", "wss://office.example.com/devtools/browser/x", ""})
 	if errs := browserAPIConfigErrors(ctx, m); len(errs) != 0 {
 		t.Errorf("all browsers + remote: %v", errs)
-	}
-	if got := browserAPISpec(ctx, m, nil); got["engine"] != nil {
-		t.Errorf("engine sent: %v", got)
 	}
 	m.Browsers = stringSet("agent-1")
 	errs := browserAPIConfigErrors(ctx, m)

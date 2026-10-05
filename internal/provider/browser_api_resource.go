@@ -52,8 +52,8 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 			"browsers": schema.SetAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "The workspace browsers it drives, by name (livellm_browser.x.name). A browser can be in " +
-					"one Browser API only. Leave it out with all_browsers = true.",
+				Description: "The workspace browsers it drives, by name (livellm_browser.x.name), Chrome or Camoufox. " +
+					"A browser can be in one Browser API only. Leave it out with all_browsers = true.",
 			},
 			"all_browsers": schema.BoolAttribute{
 				Optional: true,
@@ -80,7 +80,7 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
 			"remote_browser": schema.ListNestedBlock{
-				Description: "A browser running somewhere else, reached at its CDP websocket address. " +
+				Description: "A Chrome browser running somewhere else, reached at its CDP websocket address. " +
 					"A remote browser may be in several Browser APIs.",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
