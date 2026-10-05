@@ -228,11 +228,15 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				},
 			},
 			"database": schema.ListNestedBlock{
-				Description: "A database of the workspace this app uses (at most 8). Its connection details become the app's " +
-					"environment variables under the names in env. The password, and the url, which holds it, are read from " +
-					"the database's own stored login: they are never in the app's settings, in state or in an API answer. " +
-					"The app starts once each database accepts connections (no starts_after needed), and a database can't " +
-					"be deleted while an app links it.",
+				Description: "A database of the workspace this app uses (at most 8). The block lets the app, with every " +
+					"service of its stack, reach the database inside the workspace: a database is reached only by what links " +
+					"it. With env, its connection details become the app's environment variables under those names; the " +
+					"password, and the url, which holds it, are read from the database's own stored login: they are never in " +
+					"the app's settings, in state or in an API answer, and the app starts once the database accepts " +
+					"connections (no starts_after needed). Without env the link is reach only: no variables, no wait, and " +
+					"adding or removing the block never restarts the app (for start order use starts_after, which reaches " +
+					"too). A database can't be deleted while an app links it. Linking a database this API key didn't make " +
+					"needs a key with the Network permission.",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
@@ -240,12 +244,13 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 							Description: "The database's name, e.g. livellm_storage.db.name.",
 						},
 						"env": schema.MapAttribute{
-							Required:    true,
+							Optional:    true,
 							ElementType: types.StringType,
 							Description: "Environment variable name → the detail it carries: host, port, database, username, " +
 								"password or url (postgres://user:password@host:5432/app, redis://:password@host:6379). A Redis " +
-								"database gives host, port, url and password — no database or username. 1 to 12 variables; a name " +
-								"is used once in the app, across env, secret_env and every database block.",
+								"database gives host, port, url and password — no database or username. 0 to 12 variables; left out " +
+								"(or {}), the link is reach only. A name is used once in the app, across env, secret_env and every " +
+								"database block.",
 						},
 					},
 				},
@@ -442,7 +447,8 @@ var (
 )
 
 // databaseErrors checks the database blocks as written: at most 8, each
-// database once, 1 to 12 variables each, a detail the platform knows, and
+// database once, at most 12 variables each (none is a reach-only link), a
+// detail the platform knows, and
 // every variable name valid and used once in the app (env and secret_env
 // too). Values not known yet are left for the platform to check.
 func databaseErrors(dbs []appDatabaseModel, env, secretEnv types.Map) [][2]string {
@@ -475,9 +481,6 @@ func databaseErrors(dbs []appDatabaseModel, env, secretEnv types.Map) [][2]strin
 			continue
 		}
 		vars := d.Env.Elements()
-		if len(vars) == 0 {
-			out = append(out, [2]string{"No variables", fmt.Sprintf("Database %q: env names at least one variable and the detail it carries (%s).", name, strings.Join(linkFields, ", "))})
-		}
 		if len(vars) > maxLinkVars {
 			out = append(out, [2]string{"Too many variables", fmt.Sprintf("Database %q: at most %d variables per database; this block has %d.", name, maxLinkVars, len(vars))})
 		}
@@ -863,9 +866,15 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 		if len(dbs) > 0 {
 			links := make([]map[string]any, 0, len(dbs))
 			for _, d := range dbs {
-				var env map[string]string
-				d.Env.ElementsAs(ctx, &env, false)
-				links = append(links, map[string]any{"id": d.Name.ValueString(), "env": env})
+				link := map[string]any{"id": d.Name.ValueString()}
+				// A link without variables is reach only: it is sent with no
+				// env at all (never env: null, which a platform refuses).
+				if !d.Env.IsNull() && !d.Env.IsUnknown() && len(d.Env.Elements()) > 0 {
+					var env map[string]string
+					d.Env.ElementsAs(ctx, &env, false)
+					link["env"] = env
+				}
+				links = append(links, link)
 			}
 			spec["databases"] = links
 		}
@@ -960,9 +969,25 @@ func readEnvMap(prev types.Map, raw []any, valueFromAPI bool) types.Map {
 
 // readDatabases maps the app's database links back into state, in the
 // platform's order, so a link changed outside Terraform shows as drift and an
-// import fills the blocks. Nothing in a link is write-only.
-func readDatabases(sp map[string]any) types.List {
+// import fills the blocks. Nothing in a link is write-only. A link without
+// variables (reach only) reads as env = {} where the state wrote it so for
+// that database, and as no env otherwise.
+func readDatabases(was types.List, sp map[string]any) types.List {
 	objType := types.ObjectType{AttrTypes: appDatabaseAttrTypes}
+	emptyWritten := map[string]bool{}
+	if !was.IsNull() && !was.IsUnknown() {
+		for _, e := range was.Elements() {
+			o, ok := e.(types.Object)
+			if !ok {
+				continue
+			}
+			n, _ := o.Attributes()["name"].(types.String)
+			m, _ := o.Attributes()["env"].(types.Map)
+			if !m.IsNull() && !m.IsUnknown() && len(m.Elements()) == 0 {
+				emptyWritten[n.ValueString()] = true
+			}
+		}
+	}
 	raw, _ := sp["databases"].([]any)
 	vals := make([]attr.Value, 0, len(raw))
 	for _, e := range raw {
@@ -978,9 +1003,13 @@ func readDatabases(sp map[string]any) types.List {
 				env[k] = types.StringValue(s)
 			}
 		}
+		envVal := types.MapValueMust(types.StringType, env)
+		if len(env) == 0 && !emptyWritten[id] {
+			envVal = types.MapNull(types.StringType)
+		}
 		vals = append(vals, types.ObjectValueMust(appDatabaseAttrTypes, map[string]attr.Value{
 			"name": types.StringValue(id),
-			"env":  types.MapValueMust(types.StringType, env),
+			"env":  envVal,
 		}))
 	}
 	return types.ListValueMust(objType, vals)
@@ -1257,7 +1286,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 		state.StartsAfter = types.ListNull(types.StringType)
 	}
 	state.Port = readPorts(state.Port, sp)
-	state.Database = readDatabases(sp)
+	state.Database = readDatabases(state.Database, sp)
 	state.Volume = readVolumes(state.Volume, sp)
 	state.Stopped = types.BoolValue(w.Stopped)
 	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)

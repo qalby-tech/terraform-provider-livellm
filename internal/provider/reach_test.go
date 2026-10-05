@@ -48,8 +48,6 @@ func reachResources() []struct {
 			map[string]tftypes.Value{"os": s("ubuntu"), "username": s("u"), "password_wo": s("password1"), "password_wo_version": n(1)}},
 		{"container_app", NewContainerAppResource, "pod", func(w *client.Workload, sp map[string]any) { w.Pod = sp },
 			map[string]tftypes.Value{"image": s("nginx")}},
-		{"storage", NewStorageResource, "storage", func(w *client.Workload, sp map[string]any) { w.Storage = sp },
-			map[string]tftypes.Value{"engine": s("redis"), "password_wo": s("password1"), "password_wo_version": n(1)}},
 		{"browser", NewBrowserResource, "browser", func(w *client.Workload, sp map[string]any) { w.Browser = sp }, nil},
 		{"browser_api", NewBrowserAPIResource, "controller", func(w *client.Workload, sp map[string]any) { w.Controller = sp },
 			map[string]tftypes.Value{"all_browsers": tftypes.NewValue(tftypes.Bool, true)}},
@@ -97,6 +95,24 @@ func TestReachOnEveryResource(t *testing.T) {
 			if !strings.Contains(a.Description, w) && !strings.Contains(a.Description, strings.ReplaceAll(w, "whole ", "")) {
 				t.Errorf("%s: description lacks %q", c.name, w)
 			}
+		}
+	}
+}
+
+// A database has no reachable_from: it is reached only by what links it.
+func TestDatabaseHasNoReach(t *testing.T) {
+	ctx := context.Background()
+	var sr resource.SchemaResponse
+	NewStorageResource().Schema(ctx, resource.SchemaRequest{}, &sr)
+	if _, ok := sr.Schema.Attributes["reachable_from"]; ok {
+		t.Fatal("livellm_storage has reachable_from")
+	}
+	if _, ok := NewStorageResource().(resource.ResourceWithModifyPlan); ok {
+		t.Error("livellm_storage has a ModifyPlan (it only warned about reachable_from)")
+	}
+	for _, w := range []string{"reached only by what links it", "no reachable_from"} {
+		if !strings.Contains(sr.Schema.Description, w) {
+			t.Errorf("livellm_storage description lacks %q", w)
 		}
 	}
 }
@@ -364,8 +380,6 @@ func kindBlock(wtype string) map[string]any {
 	switch wtype {
 	case "pod":
 		return map[string]any{"image": "nginx"}
-	case "storage":
-		return map[string]any{"engine": "redis"}
 	case "controller":
 		return map[string]any{"autodiscover": true}
 	}

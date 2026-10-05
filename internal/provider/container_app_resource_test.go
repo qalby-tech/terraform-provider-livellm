@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -555,15 +556,24 @@ func TestContainerAppSpecDatabases(t *testing.T) {
 		Database: databaseList(t, []appDatabaseModel{
 			{Name: types.StringValue("cloud-db"), Env: envMap("POSTGRES_HOST", "host", "POSTGRES_PASSWORD", "password")},
 			{Name: types.StringValue("cloud-cache"), Env: envMap("REDIS_URL", "url")},
+			{Name: types.StringValue("cloud-redis"), Env: types.MapNull(types.StringType)},
+			{Name: types.StringValue("cloud-pg"), Env: envMap()},
 		}),
 	}
 	got, _ := containerAppSpec(ctx, m, false)["databases"].([]map[string]any)
 	want := []map[string]any{
 		{"id": "cloud-db", "env": map[string]string{"POSTGRES_HOST": "host", "POSTGRES_PASSWORD": "password"}},
 		{"id": "cloud-cache", "env": map[string]string{"REDIS_URL": "url"}},
+		{"id": "cloud-redis"},
+		{"id": "cloud-pg"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("databases: %v, want %v", got, want)
+	}
+	// A reach-only link goes out with no env key at all, never env: null.
+	b, _ := json.Marshal(got[2:])
+	if string(b) != `[{"id":"cloud-redis"},{"id":"cloud-pg"}]` {
+		t.Errorf("reach-only links sent as %s", b)
 	}
 	m.Database = databaseList(t, nil)
 	if _, ok := containerAppSpec(ctx, m, false)["databases"]; ok {
@@ -585,6 +595,11 @@ func TestDatabaseErrors(t *testing.T) {
 	if errs := databaseErrors(ok, envMap("MODE", "prod"), null); len(errs) != 0 {
 		t.Errorf("valid links refused: %v", errs)
 	}
+	// A link with no variables is reach only: env left out or {}.
+	reachOnly := []appDatabaseModel{{Name: str("db"), Env: null}, db("cache")}
+	if errs := databaseErrors(reachOnly, null, null); len(errs) != 0 {
+		t.Errorf("reach-only links refused: %v", errs)
+	}
 	unknown := []appDatabaseModel{{Name: types.StringUnknown(), Env: types.MapUnknown(types.StringType)}}
 	if errs := databaseErrors(unknown, null, null); len(errs) != 0 {
 		t.Errorf("values not known yet are for the platform to check: %v", errs)
@@ -605,7 +620,6 @@ func TestDatabaseErrors(t *testing.T) {
 	}{
 		{"more than 8", many, null, null, "Too many databases"},
 		{"the same database twice", []appDatabaseModel{db("db", "A", "host"), db("db", "B", "port")}, null, null, "Duplicate database"},
-		{"no variables", []appDatabaseModel{db("db")}, null, null, "No variables"},
 		{"more than 12 variables", []appDatabaseModel{db("db", manyVars...)}, null, null, "Too many variables"},
 		{"a name that isn't a variable", []appDatabaseModel{db("db", "1URL", "url")}, null, null, "Invalid variable name"},
 		{"a detail there isn't", []appDatabaseModel{db("db", "HOST", "hostname")}, null, null, "Unknown database detail"},
@@ -628,18 +642,41 @@ func TestDatabaseErrors(t *testing.T) {
 // The links read back as the platform keeps them, so a change made in the
 // console shows as drift and an import fills the blocks.
 func TestReadDatabases(t *testing.T) {
-	got := readDatabases(map[string]any{"databases": []any{
+	null := types.MapNull(types.StringType)
+	sp := map[string]any{"databases": []any{
 		map[string]any{"id": "cloud-db", "env": map[string]any{"POSTGRES_HOST": "host", "POSTGRES_PASSWORD": "password"}},
 		map[string]any{"id": "cloud-cache", "env": map[string]any{"REDIS_URL": "url"}},
-	}})
+		map[string]any{"id": "cloud-redis"},
+		map[string]any{"id": "cloud-pg"},
+	}}
+	nothing := types.ListNull(types.ObjectType{AttrTypes: appDatabaseAttrTypes})
+	got := readDatabases(nothing, sp)
 	want := databaseList(t, []appDatabaseModel{
 		{Name: types.StringValue("cloud-db"), Env: envMap("POSTGRES_HOST", "host", "POSTGRES_PASSWORD", "password")},
 		{Name: types.StringValue("cloud-cache"), Env: envMap("REDIS_URL", "url")},
+		{Name: types.StringValue("cloud-redis"), Env: null},
+		{Name: types.StringValue("cloud-pg"), Env: null},
 	})
 	if !got.Equal(want) {
 		t.Errorf("read %v, want %v", got, want)
 	}
-	if empty := readDatabases(map[string]any{}); empty.IsNull() || len(empty.Elements()) != 0 {
+	// A reach-only link the configuration wrote as env = {} keeps that form,
+	// so the next plan shows no difference; one it left env out of stays null.
+	written := databaseList(t, []appDatabaseModel{
+		{Name: types.StringValue("cloud-redis"), Env: null},
+		{Name: types.StringValue("cloud-pg"), Env: envMap()},
+	})
+	got = readDatabases(written, sp)
+	want = databaseList(t, []appDatabaseModel{
+		{Name: types.StringValue("cloud-db"), Env: envMap("POSTGRES_HOST", "host", "POSTGRES_PASSWORD", "password")},
+		{Name: types.StringValue("cloud-cache"), Env: envMap("REDIS_URL", "url")},
+		{Name: types.StringValue("cloud-redis"), Env: null},
+		{Name: types.StringValue("cloud-pg"), Env: envMap()},
+	})
+	if !got.Equal(want) {
+		t.Errorf("read over a written state %v, want %v", got, want)
+	}
+	if empty := readDatabases(nothing, map[string]any{}); empty.IsNull() || len(empty.Elements()) != 0 {
 		t.Errorf("no links read as no blocks: %v", empty)
 	}
 }

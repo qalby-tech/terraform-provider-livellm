@@ -47,7 +47,6 @@ func TestReplacingFollowsTheSchema(t *testing.T) {
 	want := map[string][]string{
 		"vm":            {"desktop", "name", "os", "username", "windows_edition"},
 		"container_app": {"name"},
-		"storage":       {"engine", "name", "username"},
 		"browser":       {"engine", "name"},
 		"browser_api":   {"name"},
 		"desktop_app":   {"keep_files", "name", "storage_gi"},
@@ -121,8 +120,8 @@ func TestWarnReachReplace(t *testing.T) {
 	}
 	reach := func(v ...string) *[]string { return &v }
 	box := client.Workload{ID: "box", Type: "vm-ubuntu", ReachableFrom: reach("*")}
-	db := client.Workload{ID: "db", Type: "storage", ReachableFrom: reach("box", "web")}
-	cache := client.Workload{ID: "cache", Type: "storage", ReachableFrom: reach("box")}
+	db := client.Workload{ID: "db", Type: "pod", ReachableFrom: reach("box", "web")}
+	cache := client.Workload{ID: "cache", Type: "pod", ReachableFrom: reach("box")}
 	var vmSchema, appSchema resource.SchemaResponse
 	NewVMResource().Schema(ctx, resource.SchemaRequest{}, &vmSchema)
 	NewContainerAppResource().Schema(ctx, resource.SchemaRequest{}, &appSchema)

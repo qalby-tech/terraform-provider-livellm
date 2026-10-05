@@ -40,7 +40,9 @@ func (r *storageResource) Metadata(_ context.Context, req resource.MetadataReque
 func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "A managed database — Postgres or Redis — with optional backups (Postgres) and " +
-			"external TLS exposure. Credentials are write-only.",
+			"external TLS exposure. Credentials are write-only. Inside the workspace a database is reached only " +
+			"by what links it: an app's database block or starts_after, a machine's or Desktop App's database " +
+			"block. It has no reachable_from. Its external address (expose) has its own allowlist.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:    true,
@@ -156,8 +158,6 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
-	withReach(resp.Schema.Attributes, "An app with a database block for it reaches it whatever this says. Its "+
-		"external address (expose) has its own allowlist.", false)
 }
 
 func (r *storageResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -192,7 +192,6 @@ type storageModel struct {
 	PlacementStrategy types.String        `tfsdk:"placement_strategy"`
 	PlacementHost     types.String        `tfsdk:"placement_host"`
 	PlacementRegion   types.String        `tfsdk:"placement_region"`
-	ReachableFrom     types.List          `tfsdk:"reachable_from"`
 }
 
 // storageBackupModel is the backup block: on when present.
@@ -448,12 +447,6 @@ func refreshStorageStatus(ctx context.Context, c *client.Client, m *storageModel
 	m.Endpoints = list
 }
 
-// ModifyPlan warns when a replacement changes who reaches the resource
-// inside the workspace.
-func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	warnReachReplace(ctx, r.data, req, resp)
-}
-
 func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan, cfg storageModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -463,8 +456,6 @@ func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 	body := storageSpec(ctx, plan, cfg.PasswordWO.ValueString(), false)
 	body["id"] = plan.Name.ValueString()
-	reach := reachOf(ctx, cfg.ReachableFrom)
-	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, "storage", body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create database", err)
 		return
@@ -480,7 +471,6 @@ func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest
 	plan.PasswordWO = types.StringNull()
 	fillStorageComputed(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	refreshStorageStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
-	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -529,7 +519,6 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 		}
 	}
 	readStorageBackup(&state, sp["backup"])
-	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	refreshPlacement(sp, &state.PlacementStrategy, &state.PlacementHost, &state.PlacementRegion)
 	refreshStorageStatus(ctx, r.data.Client, &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
@@ -547,12 +536,10 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 	if !plan.PasswordWOVersion.Equal(state.PasswordWOVersion) {
 		password = cfg.PasswordWO.ValueString()
 	}
-	reach := reachOf(ctx, cfg.ReachableFrom)
 	w := client.Workload{
-		ID:            plan.Name.ValueString(),
-		Type:          "storage",
-		Storage:       storageSpec(ctx, plan, password, true),
-		ReachableFrom: reach,
+		ID:      plan.Name.ValueString(),
+		Type:    "storage",
+		Storage: storageSpec(ctx, plan, password, true),
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update database", err)
@@ -568,7 +555,6 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 	plan.PasswordWO = types.StringNull()
 	fillStorageComputed(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	refreshStorageStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
-	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
