@@ -13,9 +13,9 @@ platform never polls your repo). Terraform waits until the app is serving, then
 reports the public address of every exposed port: an HTTPS URL for an HTTP
 port, a `host:port` for a raw TCP or UDP port. Volumes keep the app's data
 across restarts, and `stopped` keeps them while the app runs nothing. A
-`database` block links a managed database: its connection details reach the
-app as environment variables, the password without ever passing through
-Terraform.
+`database` block links a managed database: the app may reach it, and its
+connection details can reach the app as environment variables, the password
+without ever passing through Terraform.
 
 ## Example Usage
 
@@ -45,9 +45,9 @@ An app linked to its managed databases. Each `database` block names a
 database and which of its details go into which variables; the password and
 the URL are read from the database's own login when the app starts, so they
 are never in the app's settings or in state. The app starts once its
-databases accept connections. The link also lets the app reach each database,
-whatever the database's `reachable_from` says: a key that made the app and the
-databases needs no Network permission for it.
+databases accept connections. The link is also what lets the app reach each
+database: a database is reached only by what links it. A key that made the app
+and the databases needs no Network permission for it.
 
 ```terraform
 resource "livellm_storage" "db" {
@@ -100,6 +100,21 @@ resource "livellm_container_app" "cloud" {
     name       = "html"
     size_gi    = 20
     mount_path = "/var/www/html"
+  }
+}
+```
+
+A reach-only link: the app may connect to the database and takes no
+variables from it (it has its own settings), so the block adds no wait, and
+adding or removing it never restarts the app.
+
+```terraform
+resource "livellm_container_app" "worker" {
+  name  = "worker"
+  image = "ghcr.io/acme/worker:2.1"
+
+  database {
+    name = livellm_storage.cache.name
   }
 }
 ```
@@ -279,7 +294,7 @@ resource "livellm_container_app" "near" {
   values. The platform stores the values write-only — API responses carry the
   names only, so a value changed outside Terraform is re-asserted from your
   configuration on the next apply.
-- `stack` (String) The app this service belongs to, when an app is made of several services. Services of one stack always reach each other by `hostname` on any port (a `hostname` means something only inside its stack, so two stacks may both have a `db`); other resources reach a service as its `reachable_from` says, at `<workspace>-<name>`. Lowercase letters, digits and hyphens, starting with a letter.
+- `stack` (String) The app this service belongs to, when an app is made of several services. The services of one stack are one resource: they always reach each other by `hostname` on any port (a `hostname` means something only inside its stack, so two stacks may both have a `db`); other resources reach a service as its `reachable_from` says, at `<workspace>-<name>`. Through a key, adding a service to a stack whose services the key didn't all make needs the **Network** permission. Lowercase letters, digits and hyphens, starting with a letter.
 - `hostname` (String) This service's name inside its stack. Defaults to `name`.
 - `starts_after` (List of String) Names of the apps and databases this service needs first. It starts once each one's first port accepts a connection, it reaches each of them whatever their `reachable_from` says, and none of them can be deleted while it lists them. (`depends_on` is Terraform's own word, hence the name.)
 - `stopped` (Boolean) Stop the app without deleting it: it runs nothing, its
@@ -300,7 +315,7 @@ resource "livellm_container_app" "near" {
 - `database` (Block List, at most 8) A managed database of the workspace
   this app uses:
   - `name` (String, Required) The database's name, e.g. `livellm_storage.db.name` (which also has Terraform create the database first and delete it last).
-  - `env` (Map of String, Required) Environment variable name → the detail it carries:
+  - `env` (Map of String) Environment variable name → the detail it carries:
 
     | Detail | PostgreSQL | Redis |
     |---|---|---|
@@ -311,16 +326,22 @@ resource "livellm_container_app" "near" {
     | `password` | the password | the password |
     | `url` | `postgres://user:password@host:5432/app` | `redis://:password@host:6379` |
 
-    1 to 12 variables per block. A variable name is letters, digits and `_`,
+    0 to 12 variables per block. A variable name is letters, digits and `_`,
     not starting with a digit, and is used once in the app, across `env`,
     `secret_env` and every `database` block; the plan checks all of it.
+    Left out (or `{}`), the link is **reach only**: the app gets no
+    variables and doesn't wait for the database, so adding or removing the
+    block never restarts the app. For start order without variables use
+    `starts_after`, which reaches too.
 
-  The password and `url` come from the database's stored login: nothing
-  secret is written to the app's settings or to state. A linked database is
-  waited for before the app starts (no `starts_after` needed), the app reaches
-  it whatever its `reachable_from` says, and it can't be deleted while an app
+  The link lets the app, with every service of its `stack`, reach the
+  database: a database has no `reachable_from` and is reached only by what
+  links it. The password and `url` come from the database's stored login:
+  nothing secret is written to the app's settings or to state. A database the
+  link takes variables from is waited for before the app starts (no
+  `starts_after` needed), and a linked database can't be deleted while an app
   links it. Linking a database the key didn't make needs the **Network**
-  permission, unless the database lets the whole workspace in. A database whose password was set before
+  permission. A database whose password was set before
   links existed can't give `url` until its password is set once more: bump
   `password_wo_version` on its `livellm_storage` (the apply says so).
   Linked apps read a new password when they restart. Links are read back on

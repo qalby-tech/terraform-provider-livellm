@@ -3,18 +3,36 @@
 ## 0.14.0
 
 - **Added** `reachable_from` to `livellm_vm`, `livellm_container_app`,
-  `livellm_storage`, `livellm_browser`, `livellm_browser_api` and
-  `livellm_desktop_app`: which other resources of the workspace may connect to
-  this one. Names, `["*"]` for the whole workspace (also resources made later;
-  `"*"` goes alone), or `[]` for none. A service's name or its `stack` stands
-  for every service of that app.
-- **New resources are closed inside the workspace.** A resource created with
-  `reachable_from` left out is reached only by its own parts, the apps that
-  link it (`database`) or wait for it (`starts_after`), and, for a browser,
-  the Browser API that holds it (a new service of an app that is already
-  there takes that app's value instead). Write `reachable_from` on whatever
-  other resources must connect to it. Resources made before were given a
-  value when the setting arrived, mostly `["*"]`, and a refresh reads it.
+  `livellm_browser`, `livellm_browser_api` and `livellm_desktop_app`: which
+  other resources of the workspace may connect to this one. Names, `["*"]`
+  for the whole workspace (also resources made later; `"*"` goes alone), or
+  `[]` for none. A service's name or its `stack` stands for every service of
+  that app.
+- **Resources are closed inside the workspace.** A resource created with
+  `reachable_from` left out is reached only by its own parts (the services of
+  one `stack` reach each other), the apps that wait for it (`starts_after`),
+  and, for a browser, the Browser API that holds it (a new service of an app
+  that is already there takes that app's value instead). Write
+  `reachable_from` on whatever other resources must connect to it. Resources
+  made before are closed too when the setting arrives (`[]`), and a refresh
+  reads it: open what must stay reachable with `reachable_from` or a
+  `database` block.
+- **A database is reached only by what links it.** `livellm_storage` has no
+  `reachable_from`: an app's `database` block or `starts_after`, or a
+  `database` block on a machine or a Desktop App, is what lets a resource
+  reach it.
+- **Reach-only database links.** `env` in `livellm_container_app`'s
+  `database` block is optional (0 to 12 variables). Without variables the
+  link only lets the app, with every service of its stack, reach the
+  database: nothing is added to its environment and it doesn't wait for the
+  database, so adding or removing such a block never restarts the app. A link
+  with variables works as before, waiting included. For start order without
+  variables use `starts_after`.
+- **Added** a `database { name }` block to `livellm_vm` and
+  `livellm_desktop_app` (at most 8, each database once): the machine or
+  Desktop App may reach that database. Reach only: nothing is put into it and
+  nothing restarts. A database can't be deleted while a machine or Desktop
+  App links it. Refresh and import read the links back.
 - Left out later, `reachable_from` keeps the value the resource has: an update
   sends nothing about it, and removing the attribute from a configuration
   doesn't change it. `reachable_from = []` closes the resource. Refresh and
@@ -30,10 +48,13 @@
   another service of the same stack, or no resource at all, is refused at
   apply (the plan can't see other resources).
 - Linking resources a key made itself (`reachable_from`, `database`,
-  `starts_after`) needs nothing more. Letting in, or linking to, a resource
-  the key didn't make needs a key with the **Network** permission, unless the
-  one reached already lets the whole workspace in; setting `["*"]` always
-  needs it. Putting a browser into a Browser API that others may reach, or
+  `starts_after`, a shared `stack`) needs nothing more. Letting in, or linking
+  to, a resource the key didn't make needs a key with the **Network**
+  permission, unless the one reached already lets the whole workspace in
+  (`reachable_from = ["*"]`; a database never does, so linking a database a
+  person made always needs it); setting `["*"]` always needs it. Adding a
+  service to a `stack` whose services the key didn't all make is an opening
+  too. Putting a browser into a Browser API that others may reach, or
   turning on `all_browsers`, is judged the same way (a new browser joining a
   Browser API whose `all_browsers` was already on needs nothing). A
   person turns Network on for the key on the API keys page; without it the
@@ -44,7 +65,9 @@
   workspace, and an `internal` port answers only the resources
   `reachable_from` lets in; their descriptions now say so.
 - A platform without the setting reads `reachable_from` as null, and an apply
-  that sets it warns that it wasn't kept.
+  that sets it warns that it wasn't kept. A platform without reach-only links
+  refuses a `database` block without variables, and one on a machine or a
+  Desktop App, at apply with its own words.
 - A replacement is a new resource: left out of the configuration,
   `reachable_from` starts closed, and the platform drops the old resource's
   name from the other resources, which then take a second apply (or, where

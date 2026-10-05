@@ -68,7 +68,8 @@ the plan. [`livellm_hosts`](data-sources/hosts.md) lists the hosts and regions.
 
 Resources in a workspace can't reach each other unless you say so. A resource
 this provider creates starts closed to the rest of the workspace, and
-`reachable_from`, on every resource, says who may connect to it:
+`reachable_from`, on every resource but a database, says who may connect to
+it:
 
 - left out when creating, or `[]`: nothing in the workspace (a new service of
   an app that is already there takes that app's value instead);
@@ -80,11 +81,15 @@ Whatever it says, a resource is also reached by:
 
 - its own parts: the services of one stack reach each other on any port, and a
   database's copies reach each other;
-- the apps that link it with a `database` block or wait for it with
-  `starts_after`;
+- the apps that wait for it with `starts_after`;
 - for a browser, the Browser API that holds it, and with it whatever may reach
   that Browser API (it asks no key inside the workspace). Whatever drives a
   browser or a desktop acts from its place.
+
+A database has no `reachable_from`: it is reached only by what links it, an
+app's `database` block (with or without variables) or `starts_after`, and a
+`database` block on a machine or a Desktop App. A link without variables is
+reach only: it puts nothing into the app or machine and never restarts it.
 
 A caller that is let in reaches every port of the resource. Public addresses
 keep their own settings: `allow_cidrs`, `allowlist` and public ports open
@@ -93,15 +98,28 @@ public. A public address can be reached from the workspace too, through the
 edge, so making a resource public opens it to everyone.
 
 ```terraform
-resource "livellm_storage" "cache" {
-  name   = "cache"
-  engine = "redis"
+resource "livellm_container_app" "api" {
+  name  = "api"
+  image = "ghcr.io/acme/api:1.0"
 
-  password_wo         = var.redis_password
-  password_wo_version = 1
+  port {
+    name     = "http"
+    port     = 8080
+    internal = true
+  }
 
   # The worker machine may connect; nothing else in the workspace.
   reachable_from = [livellm_vm.worker.name]
+}
+
+resource "livellm_vm" "worker" {
+  name = "worker"
+  # …credentials…
+
+  # Reach only: the worker may connect to the cache, and gets no variables.
+  database {
+    name = livellm_storage.cache.name
+  }
 }
 ```
 
@@ -113,20 +131,24 @@ resource "livellm_storage" "cache" {
   write the same value on each; two different values make every apply undo the
   other one. Naming another service of the same stack is refused at apply (the
   plan can't see other resources).
-- Resources made before the setting existed were given a value when it
-  arrived, mostly `["*"]` (the whole workspace); a refresh reads whatever it
-  is.
+- Resources made before the setting existed were closed too when it arrived
+  (`[]`; a database has no value): a Composable App's services still reach
+  each other, a Browser API its browsers, and what links a database reaches
+  it, but anything else must be opened, with `reachable_from` or a `database`
+  block. A refresh reads the value.
 - A platform without the setting reads it as null, and an apply that sets it
   warns that it wasn't kept.
 
 ### Letting more in with an API key
 
 - A key that links resources it made itself needs nothing extra: a `database`
-  block, `starts_after` or `reachable_from` between two resources this key
-  created.
+  block, `starts_after`, `reachable_from` or a shared `stack` between
+  resources this key created.
 - Letting in a resource the key didn't make, or reaching one a person (or
   another key) made, needs a key with the **Network** permission, unless the
-  one reached already lets the whole workspace in. Setting
+  one reached already lets the whole workspace in (`reachable_from =
+  ["*"]`; a database never does). Adding a service to a `stack` whose
+  services the key didn't all make is an opening too. Setting
   `reachable_from = ["*"]` always needs it, whoever made the resource.
   Putting a browser into a Browser API that other resources may reach, or
   turning on `all_browsers`, is judged the same way (a new browser joining a
@@ -134,10 +156,9 @@ resource "livellm_storage" "cache" {
   turns Network on for the key on the workspace's API keys page; without it
   the apply fails with the platform's words. Narrowing or closing never needs
   it.
-- To link a new app to a database a person made, use a key with Network, or
-  have a person let the whole workspace reach that database in the console
-  first. Naming the new app in the database's `reachable_from` doesn't work:
-  the app doesn't exist yet when the database is written.
+- To link an app, a machine or a Desktop App to a database a person made, use
+  a key with Network: a database is reached only by what links it, so the
+  link is always the opening.
 - Keys and their permissions aren't managed by this provider.
 
 ### Replacing a resource
@@ -156,9 +177,10 @@ the resource and makes a new one with the same name:
   apply. Where their configuration writes `reachable_from`, the next plan
   shows the difference and a second apply puts the name back; where it leaves
   `reachable_from` out, the name stays gone until someone sets it again.
-- A resource an app links with a `database` block or waits for with
-  `starts_after` can't be deleted while the app lists it, so such a
-  replacement is refused until the link is taken out.
+- A database that an app, a machine or a Desktop App links with a `database`
+  block, or a resource an app waits for with `starts_after`, can't be deleted
+  while it is listed, so such a replacement is refused until the link is
+  taken out.
 
 The plan warns when a replacement its own attributes ask for changes who
 reaches what; `-replace` and a tainted resource don't get that warning.

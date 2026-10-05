@@ -82,8 +82,10 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 			"stack": schema.StringAttribute{
 				Optional: true,
 				Description: "The app this service belongs to, when an app is made of several services. Services of one " +
-					"stack reach each other by hostname (\"db:5432\") on any port, and only they can; two stacks may both " +
-					"have a \"db\". Lowercase letters, digits and hyphens, starting with a letter.",
+					"stack are one resource: they reach each other by hostname (\"db:5432\") on any port, and the rest of " +
+					"the workspace only as reachable_from lets it; two stacks may both have a \"db\". Through an API key, " +
+					"adding a service to a stack whose services the key didn't all make needs the Network permission. " +
+					"Lowercase letters, digits and hyphens, starting with a letter.",
 			},
 			"hostname": schema.StringAttribute{
 				Optional:    true,

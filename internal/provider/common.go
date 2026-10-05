@@ -37,11 +37,13 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 		diags.AddError(
 			"This key can't let resources reach each other",
 			fmt.Sprintf("%s: %s\n\nThrough a key without the Network permission, letting a resource reach another "+
-				"one (reachable_from, a database block, starts_after, a browser put into a Browser API that others may "+
-				"reach, or all_browsers turned on) is refused, except between resources this key made itself or when "+
-				"the one reached already let the whole workspace in. Setting reachable_from = [\"*\"] is refused "+
-				"whoever made the resource. A person turns on Network for the key on the workspace's API keys page; "+
-				"until then keep reachable_from, the links and the Browser API's browsers as they were.",
+				"one (reachable_from, a database block, starts_after, a service added to a stack, a browser put into "+
+				"a Browser API that others may reach, or all_browsers turned on) is refused, except between resources "+
+				"this key made itself or when the one reached already let the whole workspace in (reachable_from = "+
+				"[\"*\"]; a database never does: it is reached only by what links it). Setting reachable_from = "+
+				"[\"*\"] is refused whoever made the resource. A person turns on Network for the key on the "+
+				"workspace's API keys page; until then keep reachable_from, stack, the links and the Browser API's "+
+				"browsers as they were.",
 				summary, apiErr.Message()),
 		)
 		return

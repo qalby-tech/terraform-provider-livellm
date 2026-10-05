@@ -57,7 +57,7 @@ Manage the core of a workspace as code today:
 
 | Resource | What it creates |
 |---|---|
-| `livellm_vm` | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time |
+| `livellm_vm` | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, the databases it reaches |
 | `livellm_container_app` | An app from an image or a Git repo the platform builds — one service of a Composable App (`stack`, `hostname`, `starts_after`), linked to its databases (`database`), HTTP, raw TCP/UDP and internal ports, volumes, stop and start |
 | `livellm_storage` | Managed Postgres or Redis, backups, external TLS access |
 | `livellm_browser` | A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |
@@ -72,12 +72,13 @@ that region's hosts; a host pins it. `livellm_hosts` lists the hosts and
 regions.
 
 Resources can't reach each other inside the workspace unless you say so:
-every resource has `reachable_from` (names, `["*"]` for the whole workspace,
-`[]` or left out for none), and a `database` block or `starts_after` lets an
-app reach what it names. Letting more in through a key needs the Network
-permission, except between resources the key made itself or when the one
-reached already lets the whole workspace in
-([docs](docs/index.md#inside-the-workspace)).
+every resource but a database has `reachable_from` (names, `["*"]` for the
+whole workspace, `[]` or left out for none), `starts_after` lets an app reach
+what it names, and a database is reached only by what links it (a `database`
+block on an app, a machine or a Desktop App; without variables it is reach
+only). Letting more in through a key needs the Network permission, except
+between resources the key made itself or when the one reached already lets
+the whole workspace in ([docs](docs/index.md#inside-the-workspace)).
 
 Creates and updates wait until the resource is actually serving, and plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic rather than a raw

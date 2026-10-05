@@ -41,10 +41,11 @@ func reachDescription(extra string) string {
 		"workspace, also those made later. Left out when creating: none, so a new resource is closed to the rest of " +
 		"the workspace. Left out later: kept as it is; removing the attribute doesn't change it, [] closes it. " +
 		"A replacement is a new resource: it starts from this attribute, and the other resources lose its name " +
-		"(the plan warns). Whatever this says, a resource is reached by its own parts and by the apps that link it " +
-		"(a database block) or wait for it (starts_after). Public addresses keep their own settings. Through an API " +
-		"key, letting more in needs the Network permission, except between resources this key made itself or when " +
-		"this resource already lets the whole workspace in; setting [\"*\"] always needs it. Narrowing never does."
+		"(the plan warns). Whatever this says, a resource is reached by its own parts (the services of one stack " +
+		"reach each other) and by the apps that wait for it (starts_after). Public addresses keep their own " +
+		"settings. Through an API key, letting more in needs the Network permission, except between resources this " +
+		"key made itself or when this resource already lets the whole workspace in ([\"*\"]); setting [\"*\"] " +
+		"always needs it. Narrowing never does."
 	if extra != "" {
 		d += " " + extra
 	}

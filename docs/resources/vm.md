@@ -134,6 +134,21 @@ resource "livellm_vm" "eu" {
 }
 ```
 
+A machine that may reach a database (reach only: nothing is put into the
+machine, and nothing restarts; connect with the database's own address and
+login):
+
+```terraform
+resource "livellm_vm" "worker" {
+  name = "worker"
+  # …credentials…
+
+  database {
+    name = livellm_storage.db.name
+  }
+}
+```
+
 With a backup each night, the last seven kept:
 
 ```terraform
@@ -177,6 +192,8 @@ resource "livellm_vm" "build" {
 - `backup` (Block) Scheduled backups of the disk. Without the block none are scheduled; backups taken by hand are kept either way. A backup restores in place, with the machine stopped.
   - `schedule` (String, Required in the block) `@hourly`, `@daily`, `@weekly`, `@monthly` or a 5-field cron expression (UTC).
   - `keep` (Number, Required in the block) How many scheduled backups are kept, `1`..`100` — a count, unlike a database's `keep_days`.
+- `database` (Block List, at most 8) A database of the workspace this machine may reach. Reach only: nothing is put into the machine (no variables) and nothing restarts. A database is reached only by what links it, and it can't be deleted while a machine links it. Linking a database the key didn't make needs the **Network** permission. Links are read back on every refresh.
+  - `name` (String, Required) The database's name, e.g. `livellm_storage.db.name`.
 - `port` (Block List) Exposed ports:
   - `name` (String, Required) Port name — part of the hostname for HTTP ports.
   - `port` (Number, Required) Listener port inside the VM.
