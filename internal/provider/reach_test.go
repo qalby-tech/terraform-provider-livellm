@@ -271,6 +271,7 @@ func TestSettleReach(t *testing.T) {
 		return fakePlatform(t, client.Workload{ID: "web", Type: "pod", Pod: map[string]any{}, ReachableFrom: v})
 	}
 	all := &[]string{"*"}
+	partly := types.ListValueMust(types.StringType, []attr.Value{types.StringUnknown()})
 	cases := []struct {
 		name    string
 		planned types.List
@@ -286,11 +287,16 @@ func TestSettleReach(t *testing.T) {
 		{"kept in another order", names("b", "a"), &[]string{"b", "a"}, &[]string{"a", "b"}, names("b", "a"), false},
 		{"old platform", names("*"), all, nil, names("*"), true},
 		{"a stack mate wrote another", names("*"), all, &[]string{}, names("*"), true},
+		// A name known only at apply: the plan's list holds an unknown name,
+		// and the state takes the names sent, never the unknown.
+		{"a name known at apply", partly, &[]string{"web2"}, &[]string{"web2"}, names("web2"), false},
+		{"a name known at apply, not kept", partly, &[]string{"web2"}, &[]string{}, names("web2"), true},
+		{"partly known, nothing sent", partly, nil, &[]string{"a"}, names("a"), false},
 	}
 	for _, c := range cases {
 		var diags diag.Diagnostics
 		got := settleReach(ctx, held(c.held), "web", c.planned, c.sent, &diags)
-		if !got.Equal(c.want) {
+		if !got.Equal(c.want) || !whollyKnown(got) {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 		if diags.HasError() || (diags.WarningsCount() > 0) != c.warns {

@@ -448,6 +448,12 @@ func refreshStorageStatus(ctx context.Context, c *client.Client, m *storageModel
 	m.Endpoints = list
 }
 
+// ModifyPlan warns when a replacement changes who reaches the resource
+// inside the workspace.
+func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	warnReachReplace(ctx, r.data, req, resp)
+}
+
 func (r *storageResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan, cfg storageModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)

@@ -11,9 +11,10 @@
 - **New resources are closed inside the workspace.** A resource created with
   `reachable_from` left out is reached only by its own parts, the apps that
   link it (`database`) or wait for it (`starts_after`), and, for a browser,
-  the Browser API that holds it. Write `reachable_from` on whatever other
-  resources must connect to it. Resources made before keep their reachability
-  (`["*"]`), and a refresh reads it.
+  the Browser API that holds it (a new service of an app that is already
+  there takes that app's value instead). Write `reachable_from` on whatever
+  other resources must connect to it. Resources made before were given a
+  value when the setting arrived, mostly `["*"]`, and a refresh reads it.
 - Left out later, `reachable_from` keeps the value the resource has: an update
   sends nothing about it, and removing the attribute from a configuration
   doesn't change it. `reachable_from = []` closes the resource. Refresh and
@@ -25,12 +26,16 @@
   the other one.
 - Refused at plan, as the platform refuses them at apply: `"*"` next to
   another name, a name twice, more than 64 names, a name that isn't a resource
-  name, the resource itself, and a service's own `stack`.
+  name, the resource itself, and a service's own `stack`. A name that is
+  another service of the same stack, or no resource at all, is refused at
+  apply (the plan can't see other resources).
 - Linking resources a key made itself (`reachable_from`, `database`,
   `starts_after`) needs nothing more. Letting in, or linking to, a resource
   the key didn't make needs a key with the **Network** permission, unless the
-  one reached already lets the whole workspace in; `["*"]` always needs it,
-  and so does putting a browser into a Browser API that others may reach. A
+  one reached already lets the whole workspace in; setting `["*"]` always
+  needs it. Putting a browser into a Browser API that others may reach, or
+  turning on `all_browsers`, is judged the same way (a new browser joining a
+  Browser API whose `all_browsers` was already on needs nothing). A
   person turns Network on for the key on the API keys page; without it the
   apply fails with the platform's words and how to get the permission.
   Narrowing or closing never needs it. Keys and their permissions aren't
@@ -40,6 +45,14 @@
   `reachable_from` lets in; their descriptions now say so.
 - A platform without the setting reads `reachable_from` as null, and an apply
   that sets it warns that it wasn't kept.
+- A replacement is a new resource: left out of the configuration,
+  `reachable_from` starts closed, and the platform drops the old resource's
+  name from the other resources, which then take a second apply (or, where
+  their configuration leaves `reachable_from` out, a new value) to let the new
+  one in. The plan warns when a replacement changes who reaches what; see
+  "Replacing a resource" in the docs.
+- An apply whose `reachable_from` holds a name known only at apply stores the
+  names sent, never an unknown value.
 
 ## 0.13.1
 

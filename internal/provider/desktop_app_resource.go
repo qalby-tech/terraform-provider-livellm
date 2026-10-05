@@ -210,6 +210,12 @@ func (r *desktopAppResource) wait(ctx context.Context, m desktopAppModel) error 
 	return waitReady(waitCtx, r.data.Client, m.Name.ValueString(), m.Stopped.ValueBool())
 }
 
+// ModifyPlan warns when a replacement changes who reaches the resource
+// inside the workspace.
+func (r *desktopAppResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	warnReachReplace(ctx, r.data, req, resp)
+}
+
 func (r *desktopAppResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan desktopAppModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)

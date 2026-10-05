@@ -618,6 +618,7 @@ func sameKeys(a, b []string) bool {
 // ModifyPlan refuses the one change the platform can't make, and keeps
 // expires_at quiet on an apply that doesn't move it.
 func (r *vmResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	warnReachReplace(ctx, r.data, req, resp)
 	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
 		return // create or destroy
 	}

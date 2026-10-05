@@ -40,9 +40,11 @@ func reachDescription(extra string) string {
 		"several services, or that app's stack, stands for all its services), or [\"*\"] for every resource in the " +
 		"workspace, also those made later. Left out when creating: none, so a new resource is closed to the rest of " +
 		"the workspace. Left out later: kept as it is; removing the attribute doesn't change it, [] closes it. " +
-		"Whatever this says, a resource is reached by its own parts and by the apps that link it (a database block) " +
-		"or wait for it (starts_after). Public addresses keep their own settings. Letting more in needs an API key " +
-		"with the Network permission, unless this key made both resources; [\"*\"] always needs it."
+		"A replacement is a new resource: it starts from this attribute, and the other resources lose its name " +
+		"(the plan warns). Whatever this says, a resource is reached by its own parts and by the apps that link it " +
+		"(a database block) or wait for it (starts_after). Public addresses keep their own settings. Through an API " +
+		"key, letting more in needs the Network permission, except between resources this key made itself or when " +
+		"this resource already lets the whole workspace in; setting [\"*\"] always needs it. Narrowing never does."
 	if extra != "" {
 		d += " " + extra
 	}
@@ -145,12 +147,16 @@ func readReach(ctx context.Context, was types.List, held *[]string) types.List {
 }
 
 // settleReach is reachable_from in the state an apply writes. A planned value
-// that is known stays as planned: Terraform holds an apply to its plan, and
-// the next refresh shows anything the platform holds instead. Unknown (a
-// create that leaves it out) takes what the platform holds. When the
-// configuration set a value the platform didn't keep, a warning says so.
+// that is wholly known stays as planned: Terraform holds an apply to its
+// plan, and the next refresh shows anything the platform holds instead. A
+// planned value that isn't wholly known (a name known only at apply) becomes
+// what the configuration sent: a state never holds an unknown value. Unknown
+// and not sent (a create that leaves it out) takes what the platform holds.
+// When the configuration set a value the platform didn't keep, a warning says
+// so.
 func settleReach(ctx context.Context, c *client.Client, id string, planned types.List, sent *[]string, diags *diag.Diagnostics) types.List {
-	if !planned.IsUnknown() && sent == nil {
+	known := whollyKnown(planned)
+	if known && sent == nil {
 		return planned
 	}
 	var held *[]string
@@ -167,14 +173,29 @@ func settleReach(ctx context.Context, c *client.Client, id string, planned types
 					"and the services of one app share one value: the next plan shows the difference.",
 					id, describeReach(held), describeReach(sent)))
 		}
-		if !planned.IsUnknown() {
+		if known {
 			return planned
 		}
+		return reachList(*sent)
 	}
 	if held == nil {
 		return types.ListNull(types.StringType)
 	}
 	return reachList(*held)
+}
+
+// whollyKnown says whether a list and every one of its names are known (a
+// null list is known).
+func whollyKnown(l types.List) bool {
+	if l.IsUnknown() {
+		return false
+	}
+	for _, e := range l.Elements() {
+		if e.IsUnknown() {
+			return false
+		}
+	}
+	return true
 }
 
 // describeReach writes a value out for a message.
@@ -194,13 +215,16 @@ func describeReach(v *[]string) string {
 // apply: "*" goes alone, names are resource names, none twice, at most 64,
 // and never the resource itself (or, for a service, its own stack: the
 // services of one app always reach each other). Values known only at apply
-// pass.
+// pass. It sees only this resource's configuration, so a name that is
+// another service of the same stack, or no resource at all, passes here and
+// the platform refuses it at apply (422).
 type reachValidator struct {
 	stack bool
 }
 
 func (reachValidator) Description(context.Context) string {
-	return "\"*\" goes alone; resource names, each once, at most 64, never the resource itself"
+	return "\"*\" goes alone; resource names, each once, at most 64, never the resource itself or its own stack " +
+		"(another service of the same stack is refused at apply)"
 }
 
 func (v reachValidator) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }

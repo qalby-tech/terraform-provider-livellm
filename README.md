@@ -75,7 +75,8 @@ Resources can't reach each other inside the workspace unless you say so:
 every resource has `reachable_from` (names, `["*"]` for the whole workspace,
 `[]` or left out for none), and a `database` block or `starts_after` lets an
 app reach what it names. Letting more in through a key needs the Network
-permission unless the key made both resources
+permission, except between resources the key made itself or when the one
+reached already lets the whole workspace in
 ([docs](docs/index.md#inside-the-workspace)).
 
 Creates and updates wait until the resource is actually serving, and plan-pool

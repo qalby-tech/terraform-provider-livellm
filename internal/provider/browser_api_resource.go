@@ -406,6 +406,7 @@ func planRemoteAuth(ctx context.Context, plan, cfg, state browserAPIModel) (brow
 }
 
 func (r *browserAPIResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	warnReachReplace(ctx, r.data, req, resp)
 	if req.Plan.Raw.IsNull() {
 		return
 	}

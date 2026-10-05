@@ -858,6 +858,7 @@ func proxyObject(p proxyModel) types.Object {
 }
 
 func (r *browserResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	warnReachReplace(ctx, r.data, req, resp)
 	if req.Plan.Raw.IsNull() {
 		return
 	}

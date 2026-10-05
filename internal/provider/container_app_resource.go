@@ -276,8 +276,9 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 	}
 	withPlacement(resp.Schema.Attributes)
 	withReach(resp.Schema.Attributes, "An app made of several services (stack) is one resource: its services "+
-		"always reach each other and share one value, so set it on one service, or the same on each. Public ports "+
-		"and their allow_cidrs open nothing inside the workspace.", true)
+		"always reach each other and share one value, so set it on one service, or the same on each. A new service "+
+		"of an app that is already there takes the app's value when this is left out. Naming another service of "+
+		"its own stack is refused at apply. Public ports and their allow_cidrs open nothing inside the workspace.", true)
 }
 
 func (r *containerAppResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -704,6 +705,7 @@ func volumePlanChecks(plan, state []appVolumeModel) (errs, warns [][2]string) {
 
 // ModifyPlan refuses shrinking a volume and warns before one is deleted.
 func (r *containerAppResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	warnReachReplace(ctx, r.data, req, resp)
 	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
 		return // create or destroy
 	}

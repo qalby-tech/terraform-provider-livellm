@@ -70,7 +70,8 @@ Resources in a workspace can't reach each other unless you say so. A resource
 this provider creates starts closed to the rest of the workspace, and
 `reachable_from`, on every resource, says who may connect to it:
 
-- left out when creating, or `[]`: nothing in the workspace;
+- left out when creating, or `[]`: nothing in the workspace (a new service of
+  an app that is already there takes that app's value instead);
 - names: those resources. A service of an app made of several services, or
   that app's `stack`, stands for all its services;
 - `["*"]`: the whole workspace, also resources made later. `"*"` goes alone.
@@ -110,9 +111,11 @@ resource "livellm_storage" "cache" {
 - The services of one stack share one value: a change on one service changes
   it on all of them. Set it on one service and leave it out of the others, or
   write the same value on each; two different values make every apply undo the
-  other one.
-- Resources made before the setting existed stay reachable from the whole
-  workspace (`["*"]`); a refresh reads that.
+  other one. Naming another service of the same stack is refused at apply (the
+  plan can't see other resources).
+- Resources made before the setting existed were given a value when it
+  arrived, mostly `["*"]` (the whole workspace); a refresh reads whatever it
+  is.
 - A platform without the setting reads it as null, and an apply that sets it
   warns that it wasn't kept.
 
@@ -123,16 +126,42 @@ resource "livellm_storage" "cache" {
   created.
 - Letting in a resource the key didn't make, or reaching one a person (or
   another key) made, needs a key with the **Network** permission, unless the
-  one reached already lets the whole workspace in. `reachable_from = ["*"]`
-  always needs it. So does putting a browser into a Browser API that other
-  resources may reach. A person turns Network on for the key on the
-  workspace's API keys page; without it the apply fails with the platform's
-  words. Narrowing or closing never needs it.
+  one reached already lets the whole workspace in. Setting
+  `reachable_from = ["*"]` always needs it, whoever made the resource.
+  Putting a browser into a Browser API that other resources may reach, or
+  turning on `all_browsers`, is judged the same way (a new browser joining a
+  Browser API whose `all_browsers` was already on needs nothing). A person
+  turns Network on for the key on the workspace's API keys page; without it
+  the apply fails with the platform's words. Narrowing or closing never needs
+  it.
 - To link a new app to a database a person made, use a key with Network, or
   have a person let the whole workspace reach that database in the console
   first. Naming the new app in the database's `reachable_from` doesn't work:
   the app doesn't exist yet when the database is written.
 - Keys and their permissions aren't managed by this provider.
+
+### Replacing a resource
+
+Some changes replace a resource: the plan says it *must be replaced* (a
+machine's `os`, a database's `engine`, a browser's `engine`, and the like), as
+do `terraform apply -replace` and a tainted resource. A replacement deletes
+the resource and makes a new one with the same name:
+
+- The new one is made like any new resource. With `reachable_from` left out of
+  the configuration it starts closed, whatever the old one let in (a service
+  of an app that keeps other services takes the app's value). Write
+  `reachable_from` to keep it.
+- When the old one is deleted, the platform drops its name from every other
+  resource's `reachable_from`, so those don't let the new one in after the
+  apply. Where their configuration writes `reachable_from`, the next plan
+  shows the difference and a second apply puts the name back; where it leaves
+  `reachable_from` out, the name stays gone until someone sets it again.
+- A resource an app links with a `database` block or waits for with
+  `starts_after` can't be deleted while the app lists it, so such a
+  replacement is refused until the link is taken out.
+
+The plan warns when a replacement its own attributes ask for changes who
+reaches what; `-replace` and a tainted resource don't get that warning.
 
 Creates and updates wait until the resource is actually serving; plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic. Create/update timeouts are configurable per resource via the standard `timeouts` block.
