@@ -102,6 +102,8 @@ locales on offer are listed at `GET /v1/browsers/locales`.
   `engine = "camoufox"` from the configuration, replaces the browser, and the
   new one starts with an empty profile. Profiles move only between browsers of
   one engine; cookies can be imported into either.
+- A [Browser API](browser_api.md) holds browsers of either engine; a session
+  can ask for one when it starts.
 - A platform that doesn't offer Camoufox refuses the create with its message.
   A platform too old to know engines makes a Chrome browser instead: the
   apply then fails and the state holds `chrome`.

@@ -18,9 +18,9 @@ const (
 	engineCamoufox = "camoufox"
 )
 
-// engineAttribute is the engine argument of livellm_browser and
-// livellm_browser_api. It is fixed at creation: another value replaces the
-// resource.
+// engineAttribute is the engine argument of livellm_browser. It is fixed at
+// creation: another value replaces the browser. A Browser API has no engine:
+// it holds browsers of either engine.
 func engineAttribute(description string) schema.StringAttribute {
 	return schema.StringAttribute{
 		Optional:      true,
@@ -31,15 +31,16 @@ func engineAttribute(description string) schema.StringAttribute {
 	}
 }
 
-// engineSpec puts the engine into a create or update body: only Camoufox is
-// sent, so a Chrome body is what 0.12.0 sent.
+// engineSpec puts the engine into a browser's create or update body: only
+// Camoufox is sent, so a Chrome body is what 0.12.0 sent.
 func engineSpec(spec map[string]any, v types.String) {
 	if v.ValueString() == engineCamoufox {
 		spec["engine"] = engineCamoufox
 	}
 }
 
-// readEngine is the engine the platform holds: absent means Chrome.
+// readEngine is the engine the platform holds for a browser: absent means
+// Chrome.
 func readEngine(raw any) types.String {
 	if s, _ := raw.(string); s != "" {
 		return types.StringValue(s)
@@ -102,12 +103,12 @@ func engineChanged(state, plan types.String) bool {
 	return state.ValueString() != now
 }
 
-// engineKept checks that the platform kept the engine the configuration asked
-// for. A platform that doesn't know engines keeps none and makes a Chrome
-// browser; storing "camoufox" then would plan a replace on every run. It
-// answers the engine to store and, when the platform didn't keep Camoufox,
-// an error. raw is the engine the workload holds.
-func engineKept(planned types.String, raw any, what, name string) (types.String, string) {
+// engineKept checks that the platform kept the browser engine the
+// configuration asked for. A platform that doesn't know engines keeps none and
+// makes a Chrome browser; storing "camoufox" then would plan a replace on
+// every run. It answers the engine to store and, when the platform didn't keep
+// Camoufox, an error. raw is the engine the browser holds.
+func engineKept(planned types.String, raw any, name string) (types.String, string) {
 	if planned.ValueString() != engineCamoufox {
 		return planned, ""
 	}
@@ -115,6 +116,6 @@ func engineKept(planned types.String, raw any, what, name string) (types.String,
 	if held.ValueString() == engineCamoufox {
 		return planned, ""
 	}
-	return held, fmt.Sprintf("The platform made %q a Chrome %s: it doesn't offer Camoufox. "+
-		"Remove engine = \"camoufox\" to use a Chrome %s.", name, what, what)
+	return held, fmt.Sprintf("The platform made %q a Chrome browser: it doesn't offer Camoufox. "+
+		"Remove engine = \"camoufox\" to use a Chrome browser.", name)
 }

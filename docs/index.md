@@ -50,7 +50,7 @@ configuration; keys are secrets.
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
 | [`livellm_browser`](resources/browser.md) | A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |
-| [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers |
+| [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers, Chrome and Camoufox together |
 | [`livellm_desktop_app`](resources/desktop_app.md) | A Linux desktop in a container that starts in seconds |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),

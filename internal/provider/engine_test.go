@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 
@@ -20,7 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
-// A Chrome browser or Browser API sends what 0.12.0 sent: no engine key,
+// A Chrome browser sends what 0.12.0 sent: no engine key,
 // whether the engine is planned "chrome" or null (a state 0.12.0 wrote).
 func TestEngineSpecChromeSendsNothing(t *testing.T) {
 	ctx := context.Background()
@@ -34,13 +33,6 @@ func TestEngineSpecChromeSendsNothing(t *testing.T) {
 		st := b
 		if got, want := browserSpec(ctx, b, b, &st), map[string]any{"cpu": "1"}; !reflect.DeepEqual(got, want) {
 			t.Errorf("browser update %v: got %v want %v", v, got, want)
-		}
-		a := baseBrowserAPI()
-		a.Engine = v
-		a.Browsers = stringSet("agent-1")
-		got := browserAPISpec(ctx, a, nil)
-		if _, ok := got["engine"]; ok {
-			t.Errorf("browser api %v: engine sent: %v", v, got)
 		}
 	}
 }
@@ -56,12 +48,6 @@ func TestEngineSpecCamoufox(t *testing.T) {
 	if got := browserSpec(ctx, b, b, &st); got["engine"] != "camoufox" {
 		t.Errorf("browser update: %v", got)
 	}
-	a := baseBrowserAPI()
-	a.Engine = types.StringValue("camoufox")
-	a.AllBrowsers = types.BoolValue(true)
-	if got := browserAPISpec(ctx, a, nil); got["engine"] != "camoufox" {
-		t.Errorf("browser api: %v", got)
-	}
 }
 
 // Read maps an absent engine to chrome, whatever the state held.
@@ -73,13 +59,6 @@ func TestReadEngine(t *testing.T) {
 	}
 	if got := readBrowser(ctx, b, map[string]any{"engine": "camoufox"}, false).Engine; !got.Equal(types.StringValue("camoufox")) {
 		t.Errorf("camoufox: %v", got)
-	}
-	a := baseBrowserAPI()
-	if got := readBrowserAPI(a, map[string]any{"autodiscover": true}).Engine; !got.Equal(types.StringValue("chrome")) {
-		t.Errorf("api absent: %v", got)
-	}
-	if got := readBrowserAPI(a, map[string]any{"engine": "camoufox"}).Engine; !got.Equal(types.StringValue("camoufox")) {
-		t.Errorf("api camoufox: %v", got)
 	}
 }
 
@@ -164,40 +143,44 @@ func TestEngineReplaceModifier(t *testing.T) {
 
 func TestEngineSchema(t *testing.T) {
 	ctx := context.Background()
-	for _, r := range []resource.Resource{NewBrowserResource(), NewBrowserAPIResource()} {
-		var resp resource.SchemaResponse
-		r.Schema(ctx, resource.SchemaRequest{}, &resp)
-		a, ok := resp.Schema.Attributes["engine"].(schema.StringAttribute)
-		if !ok || !a.Optional || !a.Computed || len(a.PlanModifiers) != 1 {
-			t.Errorf("engine attribute: %#v", resp.Schema.Attributes["engine"])
-		}
+	var resp resource.SchemaResponse
+	NewBrowserResource().Schema(ctx, resource.SchemaRequest{}, &resp)
+	a, ok := resp.Schema.Attributes["engine"].(schema.StringAttribute)
+	if !ok || !a.Optional || !a.Computed || len(a.PlanModifiers) != 1 {
+		t.Errorf("engine attribute: %#v", resp.Schema.Attributes["engine"])
 	}
 }
 
-// A Camoufox Browser API with remote browsers is refused at plan; a Chrome
-// one, or a Camoufox one with workspace browsers, is not.
-func TestBrowserAPICamoufoxRemote(t *testing.T) {
+// A Browser API holds browsers of either engine and has no engine of its own:
+// an engine argument on livellm_browser_api fails at plan as an unexpected
+// argument, and no body it sends carries one.
+func TestBrowserAPIHasNoEngine(t *testing.T) {
 	ctx := context.Background()
+	var resp resource.SchemaResponse
+	NewBrowserAPIResource().Schema(ctx, resource.SchemaRequest{}, &resp)
+	if a, ok := resp.Schema.Attributes["engine"]; ok {
+		t.Errorf("livellm_browser_api has an engine attribute: %#v", a)
+	}
+	if _, ok := reflect.TypeOf(browserAPIModel{}).FieldByName("Engine"); ok {
+		t.Error("browserAPIModel has an Engine field")
+	}
+	all := resp.Schema.Attributes["all_browsers"].(schema.BoolAttribute).Description
+	if !strings.Contains(all, "every browser in the workspace") || strings.Contains(all, "of its engine") {
+		t.Errorf("all_browsers description: %q", all)
+	}
 	m := baseBrowserAPI()
-	m.Engine = types.StringValue("camoufox")
+	m.AllBrowsers = types.BoolValue(true)
 	m.RemoteBrowser = remoteList(t, [3]string{"office", "wss://office.example.com/devtools/browser/x", ""})
+	if errs := browserAPIConfigErrors(ctx, m); len(errs) != 0 {
+		t.Errorf("all browsers + remote: %v", errs)
+	}
+	if got := browserAPISpec(ctx, m, nil); got["engine"] != nil {
+		t.Errorf("engine sent: %v", got)
+	}
+	m.Browsers = stringSet("agent-1")
 	errs := browserAPIConfigErrors(ctx, m)
-	if len(errs) != 1 || !strings.Contains(errs[0][0], "Chrome Browser API") {
-		t.Errorf("camoufox + remote: %v", errs)
-	}
-	m.Engine = types.StringValue("chrome")
-	if errs := browserAPIConfigErrors(ctx, m); len(errs) != 0 {
-		t.Errorf("chrome + remote: %v", errs)
-	}
-	m.Engine = types.StringNull()
-	if errs := browserAPIConfigErrors(ctx, m); len(errs) != 0 {
-		t.Errorf("default + remote: %v", errs)
-	}
-	m = baseBrowserAPI()
-	m.Engine = types.StringValue("camoufox")
-	m.Browsers = stringSet("fox-1")
-	if errs := browserAPIConfigErrors(ctx, m); len(errs) != 0 {
-		t.Errorf("camoufox + browsers: %v", errs)
+	if len(errs) != 1 || !strings.Contains(errs[0][1], "every browser in the workspace;") {
+		t.Errorf("conflict text: %v", errs)
 	}
 }
 
@@ -218,19 +201,19 @@ func TestEngineKept(t *testing.T) {
 		{n, nil, n, false},
 		{s("chrome"), "camoufox", s("chrome"), false}, // not sent: the plan stays
 	} {
-		got, msg := engineKept(c.planned, c.raw, "browser", "fox")
+		got, msg := engineKept(c.planned, c.raw, "fox")
 		if !got.Equal(c.want) || (msg != "") != c.err {
 			t.Errorf("%v / %v: got %v %q", c.planned, c.raw, got, msg)
 		}
 	}
-	if _, msg := engineKept(s("camoufox"), nil, "Browser API", "pool"); !strings.Contains(msg, `"pool" a Chrome Browser API`) {
+	if _, msg := engineKept(s("camoufox"), nil, "fox"); !strings.Contains(msg, `"fox" a Chrome browser`) {
 		t.Errorf("message: %q", msg)
 	}
 }
 
 // A platform that doesn't know engines (it drops the field and makes Chrome):
-// the apply of a Camoufox browser or Browser API is an error and the state
-// holds chrome, not camoufox (which would plan a replace on every run).
+// the apply of a Camoufox browser is an error and the state holds chrome, not
+// camoufox (which would plan a replace on every run).
 func TestEngineNotKeptAfterApply(t *testing.T) {
 	engine := ""
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,11 +224,9 @@ func TestEngineNotKeptAfterApply(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/workspace":
 			_, _ = w.Write([]byte(`{"spec":{"workloads":[` +
-				`{"id":"scraper","type":"browser","browser":{"cpu":"2"` + e + `}},` +
-				`{"id":"scrapers","type":"controller","controller":{"autodiscover":true` + e + `}}]}}`))
+				`{"id":"scraper","type":"browser","browser":{"cpu":"2"` + e + `}}]}}`))
 		case "/v1/status":
-			_, _ = w.Write([]byte(`{"workloads":[{"id":"scraper","type":"browser","phase":"Running","ready":true},` +
-				`{"id":"scrapers","type":"controller","phase":"Running","ready":true}]}`))
+			_, _ = w.Write([]byte(`{"workloads":[{"id":"scraper","type":"browser","phase":"Running","ready":true}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -265,13 +246,6 @@ func TestEngineNotKeptAfterApply(t *testing.T) {
 		got := (&browserResource{data: data}).applied(ctx, b, &d)
 		if got.Engine.ValueString() != c.want || d.HasError() != c.err {
 			t.Errorf("browser, platform holds %q: engine %v, diags %v", c.engine, got.Engine, d)
-		}
-		d = nil
-		a := baseBrowserAPI()
-		a.Engine = types.StringValue("camoufox")
-		(&browserAPIResource{data: data}).waitAndRefresh(ctx, &a, 5*time.Second, "not ready", &d)
-		if a.Engine.ValueString() != c.want || d.HasError() != c.err {
-			t.Errorf("browser api, platform holds %q: engine %v, diags %v", c.engine, a.Engine, d)
 		}
 	}
 }

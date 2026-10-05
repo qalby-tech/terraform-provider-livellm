@@ -15,10 +15,12 @@ Pick its browsers by name, or drive every browser in the workspace with
 `all_browsers = true`. A workspace browser belongs to at most one Browser API.
 Browsers running somewhere else join with `remote_browser` blocks.
 
-A Browser API drives browsers of one engine: Chrome (the default) or, with
-`engine = "camoufox"`, Camoufox. `all_browsers` then means every browser of
-that engine, so an all-Chrome and an all-Camoufox Browser API can live in one
-workspace. Remote browsers go only in a Chrome Browser API.
+One Browser API can hold Chrome and Camoufox browsers together; it has no
+engine of its own. `all_browsers` means every browser in the workspace, of
+either engine, and remote browsers are Chrome. A call to `POST /start_session`
+may ask for an engine (`{"engine":"camoufox"}`): the session then starts on the
+member of that engine with the fewest open tabs. Without one it goes to the
+member with the fewest open tabs of any engine.
 
 How to call it is on the docs site's Browser API page
 (<https://docs.live-llm.com/browser-api>).
@@ -56,19 +58,21 @@ resource "livellm_browser_api" "all" {
 }
 ```
 
-Two Camoufox browsers behind one address:
+Chrome and Camoufox browsers behind one address:
 
 ```terraform
+resource "livellm_browser" "chrome" {
+  name = "agent-1"
+}
+
 resource "livellm_browser" "fox" {
-  count  = 2
-  name   = "fox-${count.index + 1}"
+  name   = "fox-1"
   engine = "camoufox"
 }
 
-resource "livellm_browser_api" "foxes" {
-  name     = "foxes"
-  engine   = "camoufox"
-  browsers = livellm_browser.fox[*].name
+resource "livellm_browser_api" "mixed" {
+  name     = "mixed"
+  browsers = [livellm_browser.chrome.name, livellm_browser.fox.name]
 }
 ```
 
@@ -93,17 +97,12 @@ resource "livellm_browser_api" "eu" {
 
 ### Optional
 
-- `engine` (String) The engine of the browsers it drives: `chrome` (the
-  default) or `camoufox`. Fixed when the Browser API is made: changing it, or
-  removing `engine = "camoufox"`, replaces the Browser API.
-- `browsers` (Set of String) The workspace browsers it drives, by name. They
-  must run its engine. A browser can be in one Browser API only; adding one
-  that another Browser API drives is refused until it is taken out there.
-- `all_browsers` (Boolean) Drive every browser of its engine in the workspace,
-  including ones made later. Defaults to `false`. Can't be combined with
-  `browsers`.
-- `remote_browser` (Block List) A browser running somewhere else (Chrome
-  Browser APIs only; refused at plan with `engine = "camoufox"`):
+- `browsers` (Set of String) The workspace browsers it drives, by name, Chrome
+  or Camoufox. A browser can be in one Browser API only; adding one that another Browser API
+  drives is refused until it is taken out there.
+- `all_browsers` (Boolean) Drive every browser in the workspace, Chrome and
+  Camoufox, including ones made later. Defaults to `false`. Can't be combined with `browsers`.
+- `remote_browser` (Block List) A Chrome browser running somewhere else:
   - `id` (String) The name calls use for it. Lowercase letters, digits and
     dashes; not the name of a workspace browser.
   - `ws_url` (String) Its CDP websocket address, `ws://` or `wss://`.
@@ -139,9 +138,8 @@ A Browser API needs at least one of `browsers`, `all_browsers = true` or a
 terraform import livellm_browser_api.scrapers scrapers
 ```
 
-Import reads the engine, the browsers, the remote browsers' addresses and whether each has
+Import reads the browsers, the remote browsers' addresses and whether each has
 a header stored; the headers themselves are never read back. Add `auth_wo` to
 the configuration before the next apply: a remote browser with a header stored
 and no `auth_wo` plans `has_auth` to `false`, with a warning, and the apply
-removes its header. Set `engine = "camoufox"` before importing a Camoufox
-Browser API: left out, the engine is Chrome, and the plan replaces it.
+removes its header.

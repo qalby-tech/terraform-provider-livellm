@@ -49,9 +49,6 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"engine": engineAttribute("The engine of the browsers it drives: \"chrome\" (the default) or \"camoufox\". " +
-				"Its browsers must all run that engine; all_browsers means every browser of that engine. Remote " +
-				"browsers go only in a Chrome Browser API. Fixed at creation: changing it replaces the Browser API."),
 			"browsers": schema.SetAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
@@ -62,8 +59,8 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(false),
-				Description: "Drive every browser of its engine in the workspace, including ones made later. No " +
-					"other Browser API of that engine can then drive a workspace browser. Can't be combined with browsers.",
+				Description: "Drive every browser in the workspace, Chrome and Camoufox, including ones made later. No other Browser API " +
+					"can then drive a workspace browser. Can't be combined with browsers.",
 			},
 			"remote_auth_version": schema.Int64Attribute{
 				Optional: true,
@@ -147,7 +144,6 @@ var remoteBrowserAttrTypes = map[string]attr.Type{
 
 type browserAPIModel struct {
 	Name              types.String   `tfsdk:"name"`
-	Engine            types.String   `tfsdk:"engine"`
 	Browsers          types.Set      `tfsdk:"browsers"`
 	AllBrowsers       types.Bool     `tfsdk:"all_browsers"`
 	RemoteBrowser     types.List     `tfsdk:"remote_browser"`
@@ -186,7 +182,6 @@ func (m browserAPIModel) remotes(ctx context.Context) []remoteBrowserModel {
 // (it answers hasAuth instead).
 func browserAPISpec(ctx context.Context, m browserAPIModel, auth map[string]string) map[string]any {
 	spec := map[string]any{}
-	engineSpec(spec, m.Engine)
 	if m.AllBrowsers.ValueBool() {
 		// autodiscover is always sent, false included: a Browser API that
 		// names its browsers must not fall back to every browser.
@@ -247,11 +242,7 @@ func browserAPIConfigErrors(ctx context.Context, m browserAPIModel) [][2]string 
 	hasRemotes := !m.RemoteBrowser.IsNull() && (m.RemoteBrowser.IsUnknown() || len(m.RemoteBrowser.Elements()) > 0)
 	if all && hasBrowsers {
 		out = append(out, [2]string{"Conflicting all_browsers and browsers",
-			"all_browsers = true already drives every browser of its engine in the workspace; remove browsers, or set all_browsers = false."})
-	}
-	if known(m.Engine) && m.Engine.ValueString() == engineCamoufox && known(m.RemoteBrowser) && len(m.RemoteBrowser.Elements()) > 0 {
-		out = append(out, [2]string{"Remote browsers go only in a Chrome Browser API",
-			"A Camoufox Browser API drives Camoufox browsers of the workspace only; remove the remote_browser blocks, or use a Chrome Browser API for them."})
+			"all_browsers = true already drives every browser in the workspace; remove browsers, or set all_browsers = false."})
 	}
 	if !all && !hasBrowsers && !hasRemotes && !m.AllBrowsers.IsUnknown() {
 		out = append(out, [2]string{"A Browser API needs browsers",
@@ -301,7 +292,6 @@ func (r *browserAPIResource) ValidateConfig(ctx context.Context, req resource.Va
 // A remote browser's header is write-only and never read back.
 func readBrowserAPI(prev browserAPIModel, sp map[string]any) browserAPIModel {
 	m := prev
-	m.Engine = readEngine(sp["engine"])
 	all, _ := sp["autodiscover"].(bool)
 	m.AllBrowsers = types.BoolValue(all)
 	raw, _ := sp["browsers"].([]any)
@@ -444,8 +434,6 @@ func baseBrowserAPIState() browserAPIModel {
 	return browserAPIModel{RemoteBrowser: types.ListNull(types.ObjectType{AttrTypes: remoteBrowserAttrTypes})}
 }
 
-// waitAndRefresh waits for the Browser API, fills in ready, and checks that
-// the platform kept a Camoufox engine.
 func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIModel, timeout time.Duration, what string, diags interface {
 	AddError(string, string)
 }) {
@@ -456,14 +444,6 @@ func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIMo
 	}
 	st, _ := statusOf(ctx, r.data.Client, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
-	if ws, err := r.data.Client.Workloads(ctx); err == nil {
-		if w := findWorkload(ws, m.Name.ValueString()); w != nil && w.Type == "controller" {
-			var msg string
-			if m.Engine, msg = engineKept(m.Engine, w.Controller["engine"], "Browser API", m.Name.ValueString()); msg != "" {
-				diags.AddError("Camoufox isn't offered", msg)
-			}
-		}
-	}
 }
 
 func (r *browserAPIResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

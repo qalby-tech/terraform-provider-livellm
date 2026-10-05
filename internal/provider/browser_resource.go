@@ -1073,7 +1073,7 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 	if ws, err := r.data.Client.Workloads(ctx); err == nil {
 		if w := findWorkload(ws, plan.Name.ValueString()); w != nil {
 			var msg string
-			if m.Engine, msg = engineKept(plan.Engine, w.Browser["engine"], "browser", plan.Name.ValueString()); msg != "" {
+			if m.Engine, msg = engineKept(plan.Engine, w.Browser["engine"], plan.Name.ValueString()); msg != "" {
 				diags.AddError("Camoufox isn't offered", msg)
 			}
 			read := readBrowser(ctx, plan, w.Browser, true)
