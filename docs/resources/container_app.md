@@ -294,7 +294,7 @@ resource "livellm_container_app" "near" {
   values. The platform stores the values write-only — API responses carry the
   names only, so a value changed outside Terraform is re-asserted from your
   configuration on the next apply.
-- `stack` (String) The app this service belongs to, when an app is made of several services. The services of one stack are one resource: they always reach each other by `hostname` on any port (a `hostname` means something only inside its stack, so two stacks may both have a `db`); other resources reach a service as its `reachable_from` says, at `<workspace>-<name>`. Through a key, adding a service to a stack whose services the key didn't all make needs the **Network** permission. Lowercase letters, digits and hyphens, starting with a letter.
+- `stack` (String) The app this service belongs to, when an app is made of several services. The services of one stack are one resource: they always reach each other by `hostname` on any port (a `hostname` means something only inside its stack, so two stacks may both have a `db`); other resources reach a service as its `reachable_from` says, at `<workspace>-<name>`. Through a key, putting a service into a stack needs the **Network** permission unless the key made that service and every service already in the stack. Lowercase letters, digits and hyphens, starting with a letter.
 - `hostname` (String) This service's name inside its stack. Defaults to `name`.
 - `starts_after` (List of String) Names of the apps and databases this service needs first. It starts once each one's first port accepts a connection, it reaches each of them whatever their `reachable_from` says, and none of them can be deleted while it lists them. (`depends_on` is Terraform's own word, hence the name.)
 - `stopped` (Boolean) Stop the app without deleting it: it runs nothing, its
@@ -340,8 +340,9 @@ resource "livellm_container_app" "near" {
   nothing secret is written to the app's settings or to state. A database the
   link takes variables from is waited for before the app starts (no
   `starts_after` needed), and a linked database can't be deleted while an app
-  links it. Linking a database the key didn't make needs the **Network**
-  permission. A database whose password was set before
+  links it. Through an API key the link needs the **Network** permission
+  unless the key made both this app and the database. A database whose
+  password was set before
   links existed can't give `url` until its password is set once more: bump
   `password_wo_version` on its `livellm_storage` (the apply says so).
   Linked apps read a new password when they restart. Links are read back on

@@ -192,7 +192,7 @@ resource "livellm_vm" "build" {
 - `backup` (Block) Scheduled backups of the disk. Without the block none are scheduled; backups taken by hand are kept either way. A backup restores in place, with the machine stopped.
   - `schedule` (String, Required in the block) `@hourly`, `@daily`, `@weekly`, `@monthly` or a 5-field cron expression (UTC).
   - `keep` (Number, Required in the block) How many scheduled backups are kept, `1`..`100` — a count, unlike a database's `keep_days`.
-- `database` (Block List, at most 8) A database of the workspace this machine may reach. Reach only: nothing is put into the machine (no variables) and nothing restarts. A database is reached only by what links it, and it can't be deleted while a machine links it. Linking a database the key didn't make needs the **Network** permission. Links are read back on every refresh.
+- `database` (Block List, at most 8) A database of the workspace this machine may reach. Reach only: nothing is put into the machine (no variables) and nothing restarts. A database is reached only by what links it, and it can't be deleted while a machine links it. Through an API key the link needs the **Network** permission unless the key made both this machine and the database. Links are read back on every refresh, and an apply warns when the platform didn't keep them.
   - `name` (String, Required) The database's name, e.g. `livellm_storage.db.name`.
 - `port` (Block List) Exposed ports:
   - `name` (String, Required) Port name — part of the hostname for HTTP ports.

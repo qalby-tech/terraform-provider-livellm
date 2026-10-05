@@ -32,7 +32,8 @@
   `livellm_desktop_app` (at most 8, each database once): the machine or
   Desktop App may reach that database. Reach only: nothing is put into it and
   nothing restarts. A database can't be deleted while a machine or Desktop
-  App links it. Refresh and import read the links back.
+  App links it. Refresh and import read the links back, and an apply warns
+  when the platform didn't keep them.
 - Left out later, `reachable_from` keeps the value the resource has: an update
   sends nothing about it, and removing the attribute from a configuration
   doesn't change it. `reachable_from = []` closes the resource. Refresh and
@@ -48,13 +49,14 @@
   another service of the same stack, or no resource at all, is refused at
   apply (the plan can't see other resources).
 - Linking resources a key made itself (`reachable_from`, `database`,
-  `starts_after`, a shared `stack`) needs nothing more. Letting in, or linking
-  to, a resource the key didn't make needs a key with the **Network**
-  permission, unless the one reached already lets the whole workspace in
-  (`reachable_from = ["*"]`; a database never does, so linking a database a
-  person made always needs it); setting `["*"]` always needs it. Adding a
-  service to a `stack` whose services the key didn't all make is an opening
-  too. Putting a browser into a Browser API that others may reach, or
+  `starts_after`, a shared `stack`) needs nothing more: the key made both
+  ends. Any other link, whichever end a person (or another key) made, needs a
+  key with the **Network** permission, unless the one reached already lets
+  the whole workspace in (`reachable_from = ["*"]`; a database never does, so
+  a `database` block needs it unless the key made both the database and what
+  links it); setting `["*"]` always needs it. Putting a service into a
+  `stack` is an opening too, unless the key made that service and every
+  service already in the stack. Putting a browser into a Browser API that others may reach, or
   turning on `all_browsers`, is judged the same way (a new browser joining a
   Browser API whose `all_browsers` was already on needs nothing). A
   person turns Network on for the key on the API keys page; without it the
@@ -66,8 +68,11 @@
   `reachable_from` lets in; their descriptions now say so.
 - A platform without the setting reads `reachable_from` as null, and an apply
   that sets it warns that it wasn't kept. A platform without reach-only links
-  refuses a `database` block without variables, and one on a machine or a
-  Desktop App, at apply with its own words.
+  refuses an app's `database` block without variables at apply with its own
+  words. It doesn't keep a `database` block on a machine or a Desktop App:
+  the apply succeeds with a warning that the links weren't kept, the machine
+  can't reach those databases, and the next plan shows the blocks to add
+  again.
 - A replacement is a new resource: left out of the configuration,
   `reachable_from` starts closed, and the platform drops the old resource's
   name from the other resources, which then take a second apply (or, where

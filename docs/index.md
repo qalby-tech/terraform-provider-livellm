@@ -156,8 +156,9 @@ resource "livellm_vm" "worker" {
 - Letting in a resource the key didn't make, or reaching one a person (or
   another key) made, needs a key with the **Network** permission, unless the
   one reached already lets the whole workspace in (`reachable_from =
-  ["*"]`; a database never does). Adding a service to a `stack` whose
-  services the key didn't all make is an opening too. Setting
+  ["*"]`; a database never does). Putting a service into a `stack` is an
+  opening too, unless the key made that service and every service already in
+  the stack. Setting
   `reachable_from = ["*"]` always needs it, whoever made the resource.
   Putting a browser into a Browser API that other resources may reach, or
   turning on `all_browsers`, is judged the same way (a new browser joining a

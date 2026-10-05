@@ -84,7 +84,8 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Description: "The app this service belongs to, when an app is made of several services. Services of one " +
 					"stack are one resource: they reach each other by hostname (\"db:5432\") on any port, and the rest of " +
 					"the workspace only as reachable_from lets it; two stacks may both have a \"db\". Through an API key, " +
-					"adding a service to a stack whose services the key didn't all make needs the Network permission. " +
+					"putting a service into a stack needs the Network permission unless the key made that service and " +
+					"every service already in the stack. " +
 					"Lowercase letters, digits and hyphens, starting with a letter.",
 			},
 			"hostname": schema.StringAttribute{
@@ -237,8 +238,8 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 					"the app's settings, in state or in an API answer, and the app starts once the database accepts " +
 					"connections (no starts_after needed). Without env the link is reach only: no variables, no wait, and " +
 					"adding or removing the block never restarts the app (for start order use starts_after, which reaches " +
-					"too). A database can't be deleted while an app links it. Linking a database this API key didn't make " +
-					"needs a key with the Network permission.",
+					"too). A database can't be deleted while an app links it. Through an API key the link needs the Network " +
+					"permission unless the key made both this app and the database.",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
