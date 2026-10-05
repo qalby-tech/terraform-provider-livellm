@@ -173,6 +173,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
+			"database": machineDatabaseBlock("machine"),
 			"backup": schema.SingleNestedBlock{
 				Description: "Scheduled backups of the machine's disk. Without the block, none are scheduled " +
 					"(backups taken by hand are kept either way). A backup restores in place, with the machine stopped.",
@@ -252,6 +253,7 @@ type vmResourceModel struct {
 	ExpiresAt         types.String   `tfsdk:"expires_at"`
 	AllowCIDRs        types.List     `tfsdk:"allow_cidrs"`
 	Port              types.List     `tfsdk:"port"`
+	Database          types.List     `tfsdk:"database"`
 	Backup            *vmBackupModel `tfsdk:"backup"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
@@ -280,6 +282,9 @@ func (r *vmResource) ValidateConfig(ctx context.Context, req resource.ValidateCo
 	}
 	for _, e := range windowsConfigErrors(cfg) {
 		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
+	}
+	for _, e := range machineDatabaseErrors(cfg.Database, "machine") {
+		resp.Diagnostics.AddAttributeError(path.Root("database"), e[0], e[1])
 	}
 }
 
@@ -520,6 +525,11 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 		}
 		spec["ports"] = out
 	}
+	// Reach-only links, in the flat create body and the vm block alike, so
+	// the save that stops a machine born stopped keeps them.
+	if links := machineDatabaseLinks(m.Database); links != nil {
+		spec["databases"] = links
+	}
 	if b := m.Backup; b != nil && b.Schedule.ValueString() != "" {
 		spec["backup"] = map[string]any{"schedule": b.Schedule.ValueString(), "keep": b.Keep.ValueInt64()}
 	}
@@ -753,6 +763,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		state.AllowCIDRs = types.ListValueMust(types.StringType, vals)
 	}
 	state.Backup = readVMBackup(sp["backup"])
+	state.Database = readMachineDatabases(sp)
 	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	// A machine's placement fills in only what the platform holds, as it always has.
 	strategy, host, region := readPlacement(sp)

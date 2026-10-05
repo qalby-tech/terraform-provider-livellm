@@ -100,6 +100,7 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
+			"database": machineDatabaseBlock("Desktop App"),
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
@@ -134,6 +135,7 @@ type desktopAppModel struct {
 	PlacementHost     types.String   `tfsdk:"placement_host"`
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
 	ReachableFrom     types.List     `tfsdk:"reachable_from"`
+	Database          types.List     `tfsdk:"database"`
 }
 
 func (r *desktopAppResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -145,6 +147,9 @@ func (r *desktopAppResource) ValidateConfig(ctx context.Context, req resource.Va
 	if !cfg.StorageGi.IsNull() && !cfg.KeepFiles.IsUnknown() && !cfg.KeepFiles.ValueBool() {
 		resp.Diagnostics.AddAttributeError(path.Root("storage_gi"), "storage_gi needs keep_files",
 			"A Desktop App keeps a home folder only with keep_files = true; without it the desktop starts clean and has none.")
+	}
+	for _, e := range machineDatabaseErrors(cfg.Database, "Desktop App") {
+		resp.Diagnostics.AddAttributeError(path.Root("database"), e[0], e[1])
 	}
 }
 
@@ -166,6 +171,10 @@ func desktopSpec(m desktopAppModel) map[string]any {
 	if pl := placementSpec(m.PlacementStrategy, m.PlacementHost, m.PlacementRegion); pl != nil {
 		spec["placement"] = pl
 	}
+	// Reach-only links, in the flat create body and the desktop block alike.
+	if links := machineDatabaseLinks(m.Database); links != nil {
+		spec["databases"] = links
+	}
 	return spec
 }
 
@@ -182,6 +191,7 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 	}
 	m.Image, m.CPU, m.Memory, m.Resolution = str("image"), str("cpu"), str("memory"), str("resolution")
 	refreshPlacement(d, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
+	m.Database = readMachineDatabases(d)
 	keep, _ := d["keepFiles"].(bool)
 	m.KeepFiles = types.BoolValue(keep)
 	m.StorageGi = types.Int64Null()
