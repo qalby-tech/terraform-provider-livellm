@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.0
+
+- **Added** `engine` to `livellm_browser` and `livellm_browser_api`: `chrome`
+  (the default) or `camoufox`, a Firefox-based browser for sites that turn a
+  Chrome browser away. A Camoufox browser is driven with Playwright 1.62
+  (`firefox.connect`), not over CDP, and takes no extensions. A Browser API
+  drives browsers of its own engine: `all_browsers` means every browser of
+  that engine, and its `browsers` must run it.
+- The engine is fixed at creation. Changing it, or removing
+  `engine = "camoufox"`, plans a replace; the new browser starts with an empty
+  profile. Refresh and import read the engine back. Set
+  `engine = "camoufox"` before importing a Camoufox browser or Browser API.
+- Refused at plan: a Camoufox `livellm_browser_api` with `remote_browser`
+  blocks (remote browsers go only in a Chrome Browser API).
+- Configurations without `engine` send exactly what 0.12.0 sent, and a state
+  0.12.0 wrote plans clean, with or without a refresh.
+- A platform that doesn't offer Camoufox refuses the create with its message.
+
 ## 0.12.0
 
 - **Added** `locale`, `timezone` and `languages` to `livellm_browser`, along

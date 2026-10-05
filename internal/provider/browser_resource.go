@@ -117,8 +117,12 @@ var objectAsOpts = basetypes.ObjectAsOptions{UnhandledNullAsEmpty: true, Unhandl
 
 func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A headless Chromium browser with a live view and a CDP endpoint for your own automation.",
+		Description: "A browser with a live view and an automation endpoint for your own automation: Chrome (CDP) " +
+			"or Camoufox (Firefox, Playwright).",
 		Attributes: map[string]schema.Attribute{
+			"engine": engineAttribute("The browser engine: \"chrome\" (the default; driven over CDP) or \"camoufox\" " +
+				"(Firefox-based; driven with Playwright 1.62, firefox.connect). Fixed at creation: changing it replaces the " +
+				"browser. Camoufox takes no extensions."),
 			"name": schema.StringAttribute{
 				Required:    true,
 				Description: "Workload id. Changing it replaces the browser.",
@@ -320,6 +324,7 @@ func (r *browserResource) Configure(_ context.Context, req resource.ConfigureReq
 
 type browserModel struct {
 	Name              types.String   `tfsdk:"name"`
+	Engine            types.String   `tfsdk:"engine"`
 	CPU               types.String   `tfsdk:"cpu"`
 	Memory            types.String   `tfsdk:"memory"`
 	Locale            types.String   `tfsdk:"locale"`
@@ -475,6 +480,7 @@ func (u upstreamModel) hasChangeIPURL() bool { return u.ChangeIPURLWO.ValueStrin
 // is no proxy change.
 func browserSpec(ctx context.Context, plan, cfg browserModel, state *browserModel) map[string]any {
 	spec := map[string]any{}
+	engineSpec(spec, plan.Engine)
 	if v := plan.CPU.ValueString(); v != "" {
 		spec["cpu"] = v
 	}
@@ -886,6 +892,7 @@ func (r *browserResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 // and an update sends nothing for it.
 func readBrowser(ctx context.Context, prev browserModel, sp map[string]any, all bool) browserModel {
 	m := prev
+	m.Engine = readEngine(sp["engine"])
 	if all || known(prev.Locale) {
 		m.Locale = readSetting(sp["locale"])
 	}

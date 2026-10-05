@@ -49,7 +49,7 @@ configuration; keys are secrets.
 | [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time |
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres or Redis, backups, external TLS access |
-| [`livellm_browser`](resources/browser.md) | Headless Chromium with a live view and a CDP endpoint; locale, time zone and rotating proxies |
+| [`livellm_browser`](resources/browser.md) | Headless A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |
 | [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers |
 | [`livellm_desktop_app`](resources/desktop_app.md) | A Linux desktop in a container that starts in seconds |
 

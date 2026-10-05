@@ -1,13 +1,14 @@
 ---
 page_title: "livellm_browser Resource - livellm"
 description: |-
-  A headless Chromium browser with a live view and a CDP endpoint.
+  A browser with a live view and an automation endpoint: Chrome or Camoufox.
 ---
 
 # livellm_browser (Resource)
 
-Creates a headless Chromium browser. Watch it live from the console, or drive
-it from your own automation over its CDP endpoint.
+Creates a browser. Watch it live from the console, or drive it from your own
+automation: a Chrome browser over its CDP endpoint, a Camoufox browser with
+Playwright.
 
 A browser can speak a language and live in a time zone of its own, answer a
 fixed location or none, and send its traffic through proxies that rotate,
@@ -64,6 +65,15 @@ resource "livellm_browser" "proxied" {
 }
 ```
 
+A Camoufox browser (Firefox-based), for sites that turn a Chrome browser away:
+
+```terraform
+resource "livellm_browser" "fox" {
+  name   = "fox"
+  engine = "camoufox"
+}
+```
+
 Pinned to one host (ids come from the `livellm_hosts` data source):
 
 ```terraform
@@ -80,6 +90,19 @@ resource "livellm_browser" "pinned" {
 `locale`, `timezone`, `languages` and `geolocation` restart the browser when
 they change. The profile, the CDP address and the live view stay. The locales
 on offer are listed at `GET /v1/browsers/locales`.
+
+## Engines
+
+- `chrome` (the default) is driven over CDP, with any CDP client.
+- `camoufox` is a Firefox-based browser. Drive it with Playwright 1.62 only
+  (`firefox.connect`, with the address and headers that connecting to the
+  browser answers), in its first context. It takes no extensions; uBlock
+  Origin is built in.
+- The engine is fixed when the browser is made. Changing it, or removing
+  `engine = "camoufox"` from the configuration, replaces the browser, and the
+  new one starts with an empty profile. Profiles move only between browsers of
+  one engine; cookies can be imported into either.
+- A platform that doesn't offer Camoufox refuses the create with its message.
 
 ## Proxies
 
@@ -135,6 +158,8 @@ is stored for it, and the plan warns about that.
 
 ### Optional
 
+- `engine` (String) `chrome` (the default) or `camoufox`, see
+  [Engines](#engines). Changing it replaces the browser.
 - `cpu` (String) CPU request, e.g. `1`.
 - `memory` (String) Memory request, e.g. `2Gi`.
 - `locale` (String) The browser's language and region, e.g. `ru-RU`, used for
@@ -205,7 +230,8 @@ terraform import livellm_browser.scraper scraper
 ```
 
 An import reads every setting the browser holds, so the first plan shows the
-ones the configuration lacks. The write-only values can't be imported, and neither can `auth_version`, which
+ones the configuration lacks. Set `engine = "camoufox"` before importing a
+Camoufox browser: left out, the engine is Chrome, and the plan replaces it. The write-only values can't be imported, and neither can `auth_version`, which
 the platform doesn't keep. When the configuration sets `auth_version`, the
 first plan after an import sets it, and that apply sends the configuration's
 values.

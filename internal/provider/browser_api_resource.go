@@ -49,6 +49,9 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"engine": engineAttribute("The engine of the browsers it drives: \"chrome\" (the default) or \"camoufox\". " +
+				"Its browsers must all run that engine; all_browsers means every browser of that engine. Remote " +
+				"browsers go only in a Chrome Browser API. Fixed at creation: changing it replaces the Browser API."),
 			"browsers": schema.SetAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
@@ -144,6 +147,7 @@ var remoteBrowserAttrTypes = map[string]attr.Type{
 
 type browserAPIModel struct {
 	Name              types.String   `tfsdk:"name"`
+	Engine            types.String   `tfsdk:"engine"`
 	Browsers          types.Set      `tfsdk:"browsers"`
 	AllBrowsers       types.Bool     `tfsdk:"all_browsers"`
 	RemoteBrowser     types.List     `tfsdk:"remote_browser"`
@@ -182,6 +186,7 @@ func (m browserAPIModel) remotes(ctx context.Context) []remoteBrowserModel {
 // (it answers hasAuth instead).
 func browserAPISpec(ctx context.Context, m browserAPIModel, auth map[string]string) map[string]any {
 	spec := map[string]any{}
+	engineSpec(spec, m.Engine)
 	if m.AllBrowsers.ValueBool() {
 		// autodiscover is always sent, false included: a Browser API that
 		// names its browsers must not fall back to every browser.
@@ -244,6 +249,10 @@ func browserAPIConfigErrors(ctx context.Context, m browserAPIModel) [][2]string 
 		out = append(out, [2]string{"Conflicting all_browsers and browsers",
 			"all_browsers = true already drives every browser in the workspace; remove browsers, or set all_browsers = false."})
 	}
+	if known(m.Engine) && m.Engine.ValueString() == engineCamoufox && known(m.RemoteBrowser) && len(m.RemoteBrowser.Elements()) > 0 {
+		out = append(out, [2]string{"Remote browsers go only in a Chrome Browser API",
+			"A Camoufox Browser API drives Camoufox browsers of the workspace only; remove the remote_browser blocks, or use a Chrome Browser API for them."})
+	}
 	if !all && !hasBrowsers && !hasRemotes && !m.AllBrowsers.IsUnknown() {
 		out = append(out, [2]string{"A Browser API needs browsers",
 			"Name its browsers in browsers, set all_browsers = true, or add a remote_browser block."})
@@ -292,6 +301,7 @@ func (r *browserAPIResource) ValidateConfig(ctx context.Context, req resource.Va
 // A remote browser's header is write-only and never read back.
 func readBrowserAPI(prev browserAPIModel, sp map[string]any) browserAPIModel {
 	m := prev
+	m.Engine = readEngine(sp["engine"])
 	all, _ := sp["autodiscover"].(bool)
 	m.AllBrowsers = types.BoolValue(all)
 	raw, _ := sp["browsers"].([]any)
