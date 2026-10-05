@@ -71,6 +71,13 @@ Every resource can say where it runs (`placement_strategy`, `placement_region`,
 that region's hosts; a host pins it. `livellm_hosts` lists the hosts and
 regions.
 
+Resources can't reach each other inside the workspace unless you say so:
+every resource has `reachable_from` (names, `["*"]` for the whole workspace,
+`[]` or left out for none), and a `database` block or `starts_after` lets an
+app reach what it names. Letting more in through a key needs the Network
+permission unless the key made both resources
+([docs](docs/index.md#inside-the-workspace)).
+
 Creates and updates wait until the resource is actually serving, and plan-pool
 exhaustion surfaces as a clear "raise your plan" diagnostic rather than a raw
 HTTP error. Create/update timeouts are configurable per resource via the standard `timeouts` block.

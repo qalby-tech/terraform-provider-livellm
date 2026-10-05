@@ -103,6 +103,8 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
+	withReach(resp.Schema.Attributes, "Its screen (VNC) asks no password inside the workspace, so whatever "+
+		"reaches it can work on the desktop.", false)
 }
 
 func (r *desktopAppResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -131,6 +133,7 @@ type desktopAppModel struct {
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
+	ReachableFrom     types.List     `tfsdk:"reachable_from"`
 }
 
 func (r *desktopAppResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -215,6 +218,8 @@ func (r *desktopAppResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 	body := desktopSpec(plan)
 	body["id"] = plan.Name.ValueString()
+	reach := configuredReach(ctx, req.Config, &resp.Diagnostics)
+	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, "desktop", body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create Desktop App", err)
 		return
@@ -230,6 +235,7 @@ func (r *desktopAppResource) Create(ctx context.Context, req resource.CreateRequ
 		resp.Diagnostics.AddError("Desktop App did not become ready", err.Error())
 	}
 	refreshDesktopStatus(ctx, r.data.Client, &plan)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -250,6 +256,7 @@ func (r *desktopAppResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 	readDesktopSpec(&state, w)
+	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	refreshDesktopStatus(ctx, r.data.Client, &state)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
@@ -260,11 +267,13 @@ func (r *desktopAppResource) Update(ctx context.Context, req resource.UpdateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	reach := configuredReach(ctx, req.Config, &resp.Diagnostics)
 	w := client.Workload{
-		ID:      plan.Name.ValueString(),
-		Type:    "desktop",
-		Stopped: plan.Stopped.ValueBool(),
-		Desktop: desktopSpec(plan),
+		ID:            plan.Name.ValueString(),
+		Type:          "desktop",
+		Stopped:       plan.Stopped.ValueBool(),
+		Desktop:       desktopSpec(plan),
+		ReachableFrom: reach,
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update Desktop App", err)
@@ -274,6 +283,7 @@ func (r *desktopAppResource) Update(ctx context.Context, req resource.UpdateRequ
 		resp.Diagnostics.AddError("Desktop App did not become ready after update", err.Error())
 	}
 	refreshDesktopStatus(ctx, r.data.Client, &plan)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

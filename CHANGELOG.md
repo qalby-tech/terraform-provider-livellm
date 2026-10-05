@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.14.0
+
+- **Added** `reachable_from` to `livellm_vm`, `livellm_container_app`,
+  `livellm_storage`, `livellm_browser`, `livellm_browser_api` and
+  `livellm_desktop_app`: which other resources of the workspace may connect to
+  this one. Names, `["*"]` for the whole workspace (also resources made later;
+  `"*"` goes alone), or `[]` for none. A service's name or its `stack` stands
+  for every service of that app.
+- **New resources are closed inside the workspace.** A resource created with
+  `reachable_from` left out is reached only by its own parts, the apps that
+  link it (`database`) or wait for it (`starts_after`), and, for a browser,
+  the Browser API that holds it. Write `reachable_from` on whatever other
+  resources must connect to it. Resources made before keep their reachability
+  (`["*"]`), and a refresh reads it.
+- Left out later, `reachable_from` keeps the value the resource has: an update
+  sends nothing about it, and removing the attribute from a configuration
+  doesn't change it. `reachable_from = []` closes the resource. Refresh and
+  import read it back, so a change made in the console shows in the plan while
+  the configuration sets it.
+- The services of one `stack` share one value: a change on one service
+  changes it on all. Set it on one service and leave it out of the others, or
+  write the same value on each; two different values make every apply undo
+  the other one.
+- Refused at plan, as the platform refuses them at apply: `"*"` next to
+  another name, a name twice, more than 64 names, a name that isn't a resource
+  name, the resource itself, and a service's own `stack`.
+- Linking resources a key made itself (`reachable_from`, `database`,
+  `starts_after`) needs nothing more. Letting in, or linking to, a resource
+  the key didn't make needs a key with the **Network** permission, unless the
+  one reached already lets the whole workspace in; `["*"]` always needs it,
+  and so does putting a browser into a Browser API that others may reach. A
+  person turns Network on for the key on the API keys page; without it the
+  apply fails with the platform's words and how to get the permission.
+  Narrowing or closing never needs it. Keys and their permissions aren't
+  managed by this provider.
+- `allow_cidrs`, `allowlist` and public ports open nothing inside the
+  workspace, and an `internal` port answers only the resources
+  `reachable_from` lets in; their descriptions now say so.
+- A platform without the setting reads `reachable_from` as null, and an apply
+  that sets it warns that it wasn't kept.
+
 ## 0.13.1
 
 - Changing a browser's `proxy` no longer needs a permission on the API key

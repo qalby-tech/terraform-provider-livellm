@@ -114,6 +114,9 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
+	withReach(resp.Schema.Attributes, "Whatever may reach the Browser API can drive every browser it holds, "+
+		"and it needs no key from inside the workspace. It reaches its own browsers whatever their reachable_from says, "+
+		"so putting a browser in a Browser API that others may reach lets them reach that browser too.", false)
 }
 
 func (r *browserAPIResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -155,6 +158,7 @@ type browserAPIModel struct {
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
+	ReachableFrom     types.List     `tfsdk:"reachable_from"`
 }
 
 func (m browserAPIModel) browserNames(ctx context.Context) []string {
@@ -455,6 +459,8 @@ func (r *browserAPIResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 	body := browserAPISpec(ctx, plan, remoteAuth(ctx, cfg))
 	body["id"] = plan.Name.ValueString()
+	reach := reachOf(ctx, cfg.ReachableFrom)
+	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, "controller", body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create Browser API", err)
 		return
@@ -463,6 +469,7 @@ func (r *browserAPIResource) Create(ctx context.Context, req resource.CreateRequ
 	resp.Diagnostics.Append(d...)
 	r.waitAndRefresh(ctx, &plan, createTimeout, "Browser API did not become ready", &resp.Diagnostics)
 	nullAuth(ctx, &plan)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -483,6 +490,7 @@ func (r *browserAPIResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 	state = readBrowserAPI(state, w.Controller)
+	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	st, _ := statusOf(ctx, r.data.Client, state.Name.ValueString())
 	state.Ready = types.BoolValue(st != nil && st.Ready)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
@@ -495,10 +503,12 @@ func (r *browserAPIResource) Update(ctx context.Context, req resource.UpdateRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	reach := reachOf(ctx, cfg.ReachableFrom)
 	w := client.Workload{
-		ID:         plan.Name.ValueString(),
-		Type:       "controller",
-		Controller: browserAPISpec(ctx, plan, remoteAuth(ctx, cfg)),
+		ID:            plan.Name.ValueString(),
+		Type:          "controller",
+		Controller:    browserAPISpec(ctx, plan, remoteAuth(ctx, cfg)),
+		ReachableFrom: reach,
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update Browser API", err)
@@ -508,6 +518,7 @@ func (r *browserAPIResource) Update(ctx context.Context, req resource.UpdateRequ
 	resp.Diagnostics.Append(d...)
 	r.waitAndRefresh(ctx, &plan, createTimeout, "Browser API did not become ready after update", &resp.Diagnostics)
 	nullAuth(ctx, &plan)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

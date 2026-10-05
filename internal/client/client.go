@@ -73,6 +73,18 @@ func (e *APIError) Message() string {
 	return e.Body
 }
 
+// Code is the platform's machine-readable reason ("code" of a JSON answer),
+// or "".
+func (e *APIError) Code() string {
+	var b struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal([]byte(e.Body), &b) == nil {
+		return b.Code
+	}
+	return ""
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
@@ -181,6 +193,11 @@ type Workload struct {
 	Controller map[string]any `json:"controller,omitempty"`
 	// Desktop is a Desktop App's settings (type "desktop").
 	Desktop map[string]any `json:"desktop,omitempty"`
+	// ReachableFrom names the other resources of the workspace that may
+	// connect to this one ("*" for all of them; empty for none). Nil is left
+	// out of a write, and the platform then keeps what it holds; a platform
+	// that doesn't know the setting reads back nil.
+	ReachableFrom *[]string `json:"reachableFrom,omitempty"`
 }
 
 // Workloads returns the workspace spec's workloads list.

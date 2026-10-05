@@ -151,7 +151,8 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"allow_cidrs": schema.ListAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Source CIDRs allowed to reach SSH and any raw ports. Omit = reachable only from inside the workspace; \"0.0.0.0/0\" = public.",
+				Description: "Source addresses (CIDRs) outside the workspace allowed to reach SSH and any raw ports: omit for none, " +
+					"\"0.0.0.0/0\" for anyone. Who reaches the machine from inside the workspace is reachable_from.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the VM is up (false while stopped)."},
 			"ssh":   schema.StringAttribute{Computed: true, Description: "host:port to SSH into the VM, as reported by the platform."},
@@ -199,8 +200,9 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 						"tcp":  schema.BoolAttribute{Optional: true, Description: "Expose as a raw TCP address instead of HTTPS."},
 						"udp":  schema.BoolAttribute{Optional: true, Description: "Expose as a raw UDP address."},
 						"internal": schema.BoolAttribute{
-							Optional:    true,
-							Description: "No public address and no node port: reachable from inside the workspace only, at <workspace>-<name>-internal:<port>.",
+							Optional: true,
+							Description: "No public address and no node port: the port is only an address inside the workspace, " +
+								"<workspace>-<name>-internal:<port>, for the resources reachable_from lets in.",
 						},
 					},
 				},
@@ -208,6 +210,8 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
+	withReach(resp.Schema.Attributes, "allow_cidrs and public ports open nothing inside the workspace: they are for "+
+		"addresses outside it.", false)
 }
 
 func (r *vmResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -252,6 +256,7 @@ type vmResourceModel struct {
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
+	ReachableFrom     types.List     `tfsdk:"reachable_from"`
 	Ready             types.Bool     `tfsdk:"ready"`
 	SSH               types.String   `tfsdk:"ssh"`
 	URL               types.String   `tfsdk:"url"`
@@ -646,6 +651,8 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 	body := vmSpec(ctx, plan, wr)
 	body["id"] = plan.Name.ValueString()
+	reach := reachOf(ctx, cfg.ReachableFrom)
+	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, plan.workloadType(), body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create VM", err)
 		return
@@ -668,6 +675,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	plan.PasswordWO = types.StringNull()
 	refreshVMSpec(ctx, r.data.Client, &plan)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -744,6 +752,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		state.AllowCIDRs = types.ListValueMust(types.StringType, vals)
 	}
 	state.Backup = readVMBackup(sp["backup"])
+	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	// A machine's placement fills in only what the platform holds, as it always has.
 	strategy, host, region := readPlacement(sp)
 	for _, f := range []struct{ read, state *types.String }{
@@ -769,11 +778,13 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 	if !plan.PasswordWOVersion.Equal(state.PasswordWOVersion) {
 		password = cfg.PasswordWO.ValueString()
 	}
+	reach := reachOf(ctx, cfg.ReachableFrom)
 	w := client.Workload{
-		ID:      plan.Name.ValueString(),
-		Type:    plan.workloadType(),
-		Stopped: plan.Stopped.ValueBool(),
-		VM:      vmSpec(ctx, plan, vmWrite{password: password, stopAfter: stopAfterToSend(plan, state)}),
+		ID:            plan.Name.ValueString(),
+		Type:          plan.workloadType(),
+		Stopped:       plan.Stopped.ValueBool(),
+		VM:            vmSpec(ctx, plan, vmWrite{password: password, stopAfter: stopAfterToSend(plan, state)}),
+		ReachableFrom: reach,
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update VM", err)
@@ -789,6 +800,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 	plan.PasswordWO = types.StringNull()
 	refreshVMSpec(ctx, r.data.Client, &plan)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

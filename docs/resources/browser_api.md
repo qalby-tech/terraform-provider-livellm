@@ -22,6 +22,13 @@ may ask for an engine (`{"engine":"camoufox"}`): the session then starts on the
 member of that engine with the fewest open tabs. Without one it goes to the
 member with the fewest open tabs of any engine.
 
+Inside the workspace the Browser API asks no key, so whatever may reach it
+(`reachable_from`) can drive every browser it holds, whatever the browsers'
+own `reachable_from` says. Putting a browser into a Browser API that other
+resources may reach therefore lets them reach that browser: through a key
+without the **Network** permission, that is refused unless the key made those
+resources too (see [Inside the workspace](../index.md#inside-the-workspace)).
+
 How to call it is on the docs site's Browser API page
 (<https://docs.live-llm.com/browser-api>).
 
@@ -116,6 +123,7 @@ resource "livellm_browser_api" "eu" {
   nothing else changed: a write-only value alone makes no plan.
 - `cpu` (String) CPU request, e.g. `500m`.
 - `memory` (String) Memory request, e.g. `1Gi`.
+- `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. Letting more in through a key needs the **Network** permission unless the key made both resources (`["*"]` always needs it); see [Inside the workspace](../index.md#inside-the-workspace). Whatever may reach it can drive every browser it holds, with no key inside the workspace.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
 - `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.

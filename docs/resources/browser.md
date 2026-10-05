@@ -214,6 +214,7 @@ is stored for it, and the plan warns about that.
     sees it, so it can't carry a login, or a token, key, password or signature
     in its query.
 - `timeouts` (Block) `create` / `delete` (default 10m each).
+- `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. Letting more in through a key needs the **Network** permission unless the key made both resources (`["*"]` always needs it); see [Inside the workspace](../index.md#inside-the-workspace). The Browser API that holds the browser reaches it whatever this says, and so does whatever may reach that Browser API.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
 - `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.

@@ -97,7 +97,8 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Optional:    true,
 				ElementType: types.StringType,
 				Description: "Names of the apps and databases this service needs first. It starts once each one's first port " +
-					"accepts a connection, and none of them can be deleted while it lists them. (depends_on is Terraform's " +
+					"accepts a connection, it reaches each of them whatever their reachable_from says, and none of them can be " +
+					"deleted while it lists them. (depends_on is Terraform's " +
 					"own word, so this is starts_after.)",
 			},
 			"env": schema.MapAttribute{
@@ -213,9 +214,9 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 						},
 						"internal": schema.BoolAttribute{
 							Optional: true,
-							Description: "No public address: the port is reachable from inside the workspace only, at " +
-								"<workspace>-<name>:<port> (and at <hostname>:<port> for the services of its stack), and may " +
-								"speak any TCP protocol — a database, a queue.",
+							Description: "No public address: the port is only an address inside the workspace, " +
+								"<workspace>-<name>:<port> (and <hostname>:<port> for the services of its stack), for the " +
+								"resources reachable_from lets in, and may speak any TCP protocol — a database, a queue.",
 						},
 						"allow_cidrs": schema.ListAttribute{
 							Optional:    true,
@@ -274,6 +275,9 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
+	withReach(resp.Schema.Attributes, "An app made of several services (stack) is one resource: its services "+
+		"always reach each other and share one value, so set it on one service, or the same on each. Public ports "+
+		"and their allow_cidrs open nothing inside the workspace.", true)
 }
 
 func (r *containerAppResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -369,6 +373,7 @@ type containerAppModel struct {
 	PlacementStrategy types.String    `tfsdk:"placement_strategy"`
 	PlacementHost     types.String    `tfsdk:"placement_host"`
 	PlacementRegion   types.String    `tfsdk:"placement_region"`
+	ReachableFrom     types.List      `tfsdk:"reachable_from"`
 }
 
 func (m containerAppModel) hasSource() bool {
@@ -522,7 +527,7 @@ func portErrors(ctx context.Context, ports []appPortModel) [][2]string {
 			out = append(out, [2]string{"Conflicting tcp and udp", fmt.Sprintf("Port %q: a raw port is either tcp or udp, not both. Add a second port for the other protocol.", name)})
 		}
 		if p.Internal.ValueBool() && (p.TCP.ValueBool() || p.UDP.ValueBool()) {
-			out = append(out, [2]string{"Conflicting internal and tcp/udp", fmt.Sprintf("Port %q: tcp and udp give a port a public address, internal keeps it inside the workspace (where it already speaks any TCP protocol). Pick one.", name)})
+			out = append(out, [2]string{"Conflicting internal and tcp/udp", fmt.Sprintf("Port %q: tcp and udp give a port a public address, internal gives it only an address inside the workspace (where it speaks any TCP protocol). Pick one.", name)})
 		}
 		if raw := p.TCP.ValueBool() || p.UDP.ValueBool(); raw && !p.Port.IsUnknown() && !p.Port.IsNull() && !p.Internal.ValueBool() {
 			proto := "tcp"
@@ -1138,6 +1143,8 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 	}
 	body := containerAppSpec(ctx, plan, true)
 	body["id"] = plan.Name.ValueString()
+	reach := configuredReach(ctx, req.Config, &resp.Diagnostics)
+	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, "pod", body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create container app", err)
 		return
@@ -1163,6 +1170,7 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 	}
 	settleHostname(&plan)
 	refreshAppStatus(ctx, r.data.Client, plan.Name.ValueString(), &plan, &resp.Diagnostics)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -1250,6 +1258,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	state.Database = readDatabases(sp)
 	state.Volume = readVolumes(state.Volume, sp)
 	state.Stopped = types.BoolValue(w.Stopped)
+	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	refreshPlacement(sp, &state.PlacementStrategy, &state.PlacementHost, &state.PlacementRegion)
 	refreshAppStatus(ctx, r.data.Client, state.Name.ValueString(), &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
@@ -1298,6 +1307,8 @@ func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRe
 	// source): the platform keeps the stored one otherwise.
 	sendToken := plan.sourceToken() != state.sourceToken() || !state.hasSource()
 	w := updateWorkloadBody(ctx, plan, sendToken)
+	reach := configuredReach(ctx, req.Config, &resp.Diagnostics)
+	w.ReachableFrom = reach
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update container app", err)
 		return
@@ -1315,6 +1326,7 @@ func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRe
 	}
 	settleHostname(&plan)
 	refreshAppStatus(ctx, r.data.Client, w.ID, &plan, &resp.Diagnostics)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

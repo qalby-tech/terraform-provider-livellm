@@ -18,7 +18,8 @@ import (
 
 // apiDiag turns a client error into an actionable diagnostic. Two cases have
 // dedicated wording: 402, the workspace plan's resource pool is exhausted (the
-// fix is a plan change, not a config change), and a 403 that names proxies,
+// fix is a plan change, not a config change); a 403 for letting one resource
+// reach another without the Network permission; and a 403 that names proxies,
 // which only a platform from before the proxies permission was dropped sends:
 // it is shown in the platform's words and says where it comes from.
 func apiDiag(diags *diag.Diagnostics, summary string, err error) {
@@ -32,6 +33,17 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 		)
 		return
 	}
+	if errors.As(err, &apiErr) && apiErr.Status == 403 && networkRefusal(apiErr) {
+		diags.AddError(
+			"This key can't let resources reach each other",
+			fmt.Sprintf("%s: %s\n\nLetting a resource reach another one (reachable_from, a database block or "+
+				"starts_after) needs the Network permission when this key didn't make both of them, unless the one "+
+				"reached already lets the whole workspace in. A person turns on Network for the key on the "+
+				"workspace's API keys page; until then keep reachable_from and the links as they were.",
+				summary, apiErr.Message()),
+		)
+		return
+	}
 	if errors.As(err, &apiErr) && apiErr.Status == 403 && strings.Contains(strings.ToLower(apiErr.Message()), "prox") {
 		diags.AddError(
 			summary,
@@ -42,6 +54,16 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 		return
 	}
 	diags.AddError(summary, err.Error())
+}
+
+// networkRefusal says whether a 403 is the platform refusing to let one
+// resource reach another: its code, or its wording from a platform that
+// sends no code.
+func networkRefusal(e *client.APIError) bool {
+	if e.Code() == "network_permission" {
+		return true
+	}
+	return strings.Contains(e.Message(), "turn on Network")
 }
 
 // findWorkload returns the workload with the given id, or nil.

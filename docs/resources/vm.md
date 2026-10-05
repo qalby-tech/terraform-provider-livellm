@@ -26,7 +26,7 @@ resource "livellm_vm" "dev" {
   password_wo_version = 1
   ssh_keys            = [file("~/.ssh/id_ed25519.pub")]
 
-  # Reachable from anywhere; omit for workspace-internal only.
+  # SSH and raw ports from anywhere; omit for no address outside the workspace.
   allow_cidrs = ["0.0.0.0/0"]
 
   port {
@@ -168,7 +168,8 @@ resource "livellm_vm" "build" {
 - `ssh_keys` (List of String) SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. On Windows they open SSH, with PowerShell as its shell. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
-- `allow_cidrs` (List of String) Source CIDRs allowed to reach SSH and raw ports. Omit for workspace-internal only; `0.0.0.0/0` for public.
+- `allow_cidrs` (List of String) Source addresses (CIDRs) outside the workspace allowed to reach SSH and raw ports: omit for none, `0.0.0.0/0` for anyone. Who reaches the machine from inside the workspace is `reachable_from`.
+- `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. Letting more in through a key needs the **Network** permission unless the key made both resources (`["*"]` always needs it); see [Inside the workspace](../index.md#inside-the-workspace). `allow_cidrs` and public ports open nothing inside the workspace.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
 - `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
@@ -181,7 +182,7 @@ resource "livellm_vm" "build" {
   - `port` (Number, Required) Listener port inside the VM.
   - `tcp` (Boolean) Expose as a raw TCP address instead of HTTPS.
   - `udp` (Boolean) Expose as a raw UDP address.
-  - `internal` (Boolean) No public address and no node port: reachable from inside the workspace only, at `<workspace>-<name>-internal:<port>`.
+  - `internal` (Boolean) No public address and no node port: the port is only an address inside the workspace, `<workspace>-<name>-internal:<port>`, for the resources `reachable_from` lets in.
 
 ### Read-Only
 

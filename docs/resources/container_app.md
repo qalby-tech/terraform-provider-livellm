@@ -45,7 +45,9 @@ An app linked to its managed databases. Each `database` block names a
 database and which of its details go into which variables; the password and
 the URL are read from the database's own login when the app starts, so they
 are never in the app's settings or in state. The app starts once its
-databases accept connections.
+databases accept connections. The link also lets the app reach each database,
+whatever the database's `reachable_from` says: a key that made the app and the
+databases needs no Network permission for it.
 
 ```terraform
 resource "livellm_storage" "db" {
@@ -131,7 +133,9 @@ resource "livellm_container_app" "api" {
 ```
 
 An app made of several services: they reach each other by their short names,
-on any port. A port marked `internal` has no public address.
+on any port, whatever `reachable_from` says. A port marked `internal` has no
+public address. Here the machine `worker` may reach the app too; one value
+covers every service of the stack, so it is written on one service only.
 
 ```terraform
 resource "livellm_container_app" "db" {
@@ -153,6 +157,8 @@ resource "livellm_container_app" "web" {
   hostname     = "web"
   image        = "ghcr.io/acme/shop:1.4"
   starts_after = [livellm_container_app.db.name]
+
+  reachable_from = [livellm_vm.worker.name]
 
   env = {
     DATABASE_HOST = "db"
@@ -273,9 +279,9 @@ resource "livellm_container_app" "near" {
   values. The platform stores the values write-only — API responses carry the
   names only, so a value changed outside Terraform is re-asserted from your
   configuration on the next apply.
-- `stack` (String) The app this service belongs to, when an app is made of several services. Services of one stack reach each other by `hostname` on any port, and only they can; two stacks may both have a `db`. Lowercase letters, digits and hyphens, starting with a letter.
+- `stack` (String) The app this service belongs to, when an app is made of several services. Services of one stack always reach each other by `hostname` on any port (a `hostname` means something only inside its stack, so two stacks may both have a `db`); other resources reach a service as its `reachable_from` says, at `<workspace>-<name>`. Lowercase letters, digits and hyphens, starting with a letter.
 - `hostname` (String) This service's name inside its stack. Defaults to `name`.
-- `starts_after` (List of String) Names of the apps and databases this service needs first. It starts once each one's first port accepts a connection, and none of them can be deleted while it lists them. (`depends_on` is Terraform's own word, hence the name.)
+- `starts_after` (List of String) Names of the apps and databases this service needs first. It starts once each one's first port accepts a connection, it reaches each of them whatever their `reachable_from` says, and none of them can be deleted while it lists them. (`depends_on` is Terraform's own word, hence the name.)
 - `stopped` (Boolean) Stop the app without deleting it: it runs nothing, its
   volumes are kept and only their disk is billed. Defaults to `false`; setting
   it back to `false` starts the app again.
@@ -284,7 +290,7 @@ resource "livellm_container_app" "near" {
   - `port` (Number, Required) Container port.
   - `tcp` (Boolean) A raw TCP port instead of HTTP: a public `host:port` address (in `endpoints`) rather than an HTTPS hostname — a game server, a mail server, anything that isn't HTTP.
   - `udp` (Boolean) A raw UDP port with a public `host:port` address — a VPN, DNS, voice. A port is `tcp` or `udp`, not both; add a second port for the other protocol. One number can be a tcp port and a udp port of the same app, but not the same protocol twice.
-  - `internal` (Boolean) No public address: reachable from inside the workspace only, at `<workspace>-<name>:<port>` (and at `<hostname>:<port>` for the services of its stack); any TCP protocol. Not with `tcp`, `udp` or `allow_cidrs`.
+  - `internal` (Boolean) No public address: the port is only an address inside the workspace, `<workspace>-<name>:<port>` (and `<hostname>:<port>` for the services of its stack), for the resources `reachable_from` lets in; any TCP protocol. Not with `tcp`, `udp` or `allow_cidrs`.
   - `allow_cidrs` (List of String) Source addresses allowed to reach the port, as CIDRs (`203.0.113.0/24`; one address is `203.0.113.7/32`). Unset = anyone. A raw port takes no password, so this is its only protection: set it unless the port is meant for the public.
 
   Ports are read back on every refresh, so a port changed outside Terraform
@@ -311,8 +317,10 @@ resource "livellm_container_app" "near" {
 
   The password and `url` come from the database's stored login: nothing
   secret is written to the app's settings or to state. A linked database is
-  waited for before the app starts (no `starts_after` needed), and can't be
-  deleted while an app links it. A database whose password was set before
+  waited for before the app starts (no `starts_after` needed), the app reaches
+  it whatever its `reachable_from` says, and it can't be deleted while an app
+  links it. Linking a database the key didn't make needs the **Network**
+  permission, unless the database lets the whole workspace in. A database whose password was set before
   links existed can't give `url` until its password is set once more: bump
   `password_wo_version` on its `livellm_storage` (the apply says so).
   Linked apps read a new password when they restart. Links are read back on
@@ -326,6 +334,7 @@ resource "livellm_container_app" "near" {
   **Removing a `volume` block deletes that volume and everything on it.** The
   plan warns about it by name before you apply. An app with volumes runs one
   copy of itself.
+- `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. Letting more in through a key needs the **Network** permission unless the key made both resources (`["*"]` always needs it); see [Inside the workspace](../index.md#inside-the-workspace). The services of one `stack` are one resource: they always reach each other and share one value, so set it on one service and leave it out of the others, or write the same value on each. A service's name or its `stack` in another resource's list stands for all the services.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down. An app with volumes and a location stops before its new copy starts, so each change briefly takes it offline.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
 - `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.

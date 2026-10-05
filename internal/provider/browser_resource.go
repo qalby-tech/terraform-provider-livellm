@@ -309,6 +309,8 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
+	withReach(resp.Schema.Attributes, "A Browser API that holds this browser reaches it whatever this says, and so "+
+		"does whatever may reach that Browser API: it drives the browser from its place.", false)
 }
 
 func (r *browserResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
@@ -339,6 +341,7 @@ type browserModel struct {
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
+	ReachableFrom     types.List     `tfsdk:"reachable_from"`
 }
 
 type geoModel struct {
@@ -1132,6 +1135,8 @@ func (r *browserResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 	body := browserSpec(ctx, plan, cfg, nil)
 	body["id"] = plan.Name.ValueString()
+	reach := reachOf(ctx, cfg.ReachableFrom)
+	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, "browser", body); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot create browser", err)
 		return
@@ -1144,6 +1149,7 @@ func (r *browserResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.AddError("Browser did not become ready", err.Error())
 	}
 	plan = r.applied(ctx, plan, &resp.Diagnostics)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -1169,6 +1175,7 @@ func (r *browserResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.Diagnostics.Append(resp.Private.SetKey(ctx, importedKey, nil)...)
 	}
 	state = readBrowser(ctx, state, w.Browser, imported)
+	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	st, _ := statusOf(ctx, r.data.Client, state.Name.ValueString())
 	state.Ready = types.BoolValue(st != nil && st.Ready)
 	var fromSpec *bool
@@ -1187,10 +1194,12 @@ func (r *browserResource) Update(ctx context.Context, req resource.UpdateRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	reach := reachOf(ctx, cfg.ReachableFrom)
 	w := client.Workload{
-		ID:      plan.Name.ValueString(),
-		Type:    "browser",
-		Browser: browserSpec(ctx, plan, cfg, &state),
+		ID:            plan.Name.ValueString(),
+		Type:          "browser",
+		Browser:       browserSpec(ctx, plan, cfg, &state),
+		ReachableFrom: reach,
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
 		apiDiag(&resp.Diagnostics, "Cannot update browser", err)
@@ -1204,6 +1213,7 @@ func (r *browserResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("Browser did not become ready after update", err.Error())
 	}
 	plan = r.applied(ctx, plan, &resp.Diagnostics)
+	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
