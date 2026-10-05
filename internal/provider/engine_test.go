@@ -2,10 +2,16 @@ package provider
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -89,7 +95,8 @@ func TestEngineChanged(t *testing.T) {
 		{s("camoufox"), s("camoufox"), false},
 		{s("chrome"), s("camoufox"), true},
 		{s("camoufox"), s("chrome"), true},
-		{n, s("camoufox"), true}, // a 0.12.0 state holds a Chrome browser
+		{n, s("camoufox"), false}, // a 0.12.0 state holds no known engine: the platform checks
+		{n, u, false},
 		{s("chrome"), u, true},
 		{u, s("chrome"), false},
 	} {
@@ -141,8 +148,11 @@ func TestEngineReplaceModifier(t *testing.T) {
 	if r := run(obj(nil), n, s("chrome"), s("chrome")); r.RequiresReplace {
 		t.Error("null state -> chrome must not replace")
 	}
-	if r := run(obj(nil), n, s("camoufox"), s("camoufox")); !r.RequiresReplace {
-		t.Error("null state (Chrome) -> camoufox must replace")
+	// a null state holds no known engine: camoufox over it is an update the
+	// platform keeps (a Camoufox browser) or refuses (a Chrome one), never a
+	// replace that would wipe the profile
+	if r := run(obj(nil), n, s("camoufox"), s("camoufox")); r.RequiresReplace || !r.PlanValue.Equal(s("camoufox")) {
+		t.Errorf("null state -> camoufox must not replace: %v %v", r.RequiresReplace, r.PlanValue)
 	}
 	if r := run(obj("chrome"), s("chrome"), s("camoufox"), s("camoufox")); !r.RequiresReplace {
 		t.Error("chrome -> camoufox must replace")
@@ -188,5 +198,80 @@ func TestBrowserAPICamoufoxRemote(t *testing.T) {
 	m.Browsers = stringSet("fox-1")
 	if errs := browserAPIConfigErrors(ctx, m); len(errs) != 0 {
 		t.Errorf("camoufox + browsers: %v", errs)
+	}
+}
+
+// The engine read back after an apply: a Camoufox engine the platform didn't
+// keep is an error and the state holds what it made; anything else is the plan.
+func TestEngineKept(t *testing.T) {
+	s, n := types.StringValue, types.StringNull()
+	for _, c := range []struct {
+		planned types.String
+		raw     any
+		want    types.String
+		err     bool
+	}{
+		{s("camoufox"), "camoufox", s("camoufox"), false},
+		{s("camoufox"), nil, s("chrome"), true}, // a platform that drops the field
+		{s("camoufox"), "chrome", s("chrome"), true},
+		{s("chrome"), nil, s("chrome"), false},
+		{n, nil, n, false},
+		{s("chrome"), "camoufox", s("chrome"), false}, // not sent: the plan stays
+	} {
+		got, msg := engineKept(c.planned, c.raw, "browser", "fox")
+		if !got.Equal(c.want) || (msg != "") != c.err {
+			t.Errorf("%v / %v: got %v %q", c.planned, c.raw, got, msg)
+		}
+	}
+	if _, msg := engineKept(s("camoufox"), nil, "Browser API", "pool"); !strings.Contains(msg, `"pool" a Chrome Browser API`) {
+		t.Errorf("message: %q", msg)
+	}
+}
+
+// A platform that doesn't know engines (it drops the field and makes Chrome):
+// the apply of a Camoufox browser or Browser API is an error and the state
+// holds chrome, not camoufox (which would plan a replace on every run).
+func TestEngineNotKeptAfterApply(t *testing.T) {
+	engine := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		e := ""
+		if engine != "" {
+			e = `,"engine":"` + engine + `"`
+		}
+		switch r.URL.Path {
+		case "/v1/workspace":
+			_, _ = w.Write([]byte(`{"spec":{"workloads":[` +
+				`{"id":"scraper","type":"browser","browser":{"cpu":"2"` + e + `}},` +
+				`{"id":"scrapers","type":"controller","controller":{"autodiscover":true` + e + `}}]}}`))
+		case "/v1/status":
+			_, _ = w.Write([]byte(`{"workloads":[{"id":"scraper","type":"browser","phase":"Running","ready":true},` +
+				`{"id":"scrapers","type":"controller","phase":"Running","ready":true}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	data := &providerData{Client: client.New(srv.URL, "llc_test")}
+	ctx := context.Background()
+	for _, c := range []struct {
+		engine string
+		want   string
+		err    bool
+	}{{"", "chrome", true}, {"camoufox", "camoufox", false}} {
+		engine = c.engine
+		var d diag.Diagnostics
+		b := baseBrowser()
+		b.Engine = types.StringValue("camoufox")
+		got := (&browserResource{data: data}).applied(ctx, b, &d)
+		if got.Engine.ValueString() != c.want || d.HasError() != c.err {
+			t.Errorf("browser, platform holds %q: engine %v, diags %v", c.engine, got.Engine, d)
+		}
+		d = nil
+		a := baseBrowserAPI()
+		a.Engine = types.StringValue("camoufox")
+		(&browserAPIResource{data: data}).waitAndRefresh(ctx, &a, 5*time.Second, "not ready", &d)
+		if a.Engine.ValueString() != c.want || d.HasError() != c.err {
+			t.Errorf("browser api, platform holds %q: engine %v, diags %v", c.engine, a.Engine, d)
+		}
 	}
 }

@@ -88,8 +88,8 @@ resource "livellm_browser" "pinned" {
 ## Locale and time zone
 
 `locale`, `timezone`, `languages` and `geolocation` restart the browser when
-they change. The profile, the CDP address and the live view stay. The locales
-on offer are listed at `GET /v1/browsers/locales`.
+they change. The profile, the connection address and the live view stay. The
+locales on offer are listed at `GET /v1/browsers/locales`.
 
 ## Engines
 
@@ -103,6 +103,8 @@ on offer are listed at `GET /v1/browsers/locales`.
   new one starts with an empty profile. Profiles move only between browsers of
   one engine; cookies can be imported into either.
 - A platform that doesn't offer Camoufox refuses the create with its message.
+  A platform too old to know engines makes a Chrome browser instead: the
+  apply then fails and the state holds `chrome`.
 
 ## Proxies
 

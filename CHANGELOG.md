@@ -17,6 +17,11 @@
 - Configurations without `engine` send exactly what 0.12.0 sent, and a state
   0.12.0 wrote plans clean, with or without a refresh.
 - A platform that doesn't offer Camoufox refuses the create with its message.
+  A platform too old to know engines makes a Chrome browser or Browser API
+  instead: the apply fails and the state holds `chrome`, never `camoufox`.
+- `engine = "camoufox"` over a state 0.12.0 wrote (no engine in it) is an
+  update, never a replace: the platform keeps a Camoufox browser as it is and
+  refuses to turn a Chrome one into Camoufox.
 
 ## 0.12.0
 

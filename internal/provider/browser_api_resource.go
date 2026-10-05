@@ -62,8 +62,8 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(false),
-				Description: "Drive every browser in the workspace, including ones made later. No other Browser API " +
-					"can then drive a workspace browser. Can't be combined with browsers.",
+				Description: "Drive every browser of its engine in the workspace, including ones made later. No " +
+					"other Browser API of that engine can then drive a workspace browser. Can't be combined with browsers.",
 			},
 			"remote_auth_version": schema.Int64Attribute{
 				Optional: true,
@@ -247,7 +247,7 @@ func browserAPIConfigErrors(ctx context.Context, m browserAPIModel) [][2]string 
 	hasRemotes := !m.RemoteBrowser.IsNull() && (m.RemoteBrowser.IsUnknown() || len(m.RemoteBrowser.Elements()) > 0)
 	if all && hasBrowsers {
 		out = append(out, [2]string{"Conflicting all_browsers and browsers",
-			"all_browsers = true already drives every browser in the workspace; remove browsers, or set all_browsers = false."})
+			"all_browsers = true already drives every browser of its engine in the workspace; remove browsers, or set all_browsers = false."})
 	}
 	if known(m.Engine) && m.Engine.ValueString() == engineCamoufox && known(m.RemoteBrowser) && len(m.RemoteBrowser.Elements()) > 0 {
 		out = append(out, [2]string{"Remote browsers go only in a Chrome Browser API",
@@ -444,6 +444,8 @@ func baseBrowserAPIState() browserAPIModel {
 	return browserAPIModel{RemoteBrowser: types.ListNull(types.ObjectType{AttrTypes: remoteBrowserAttrTypes})}
 }
 
+// waitAndRefresh waits for the Browser API, fills in ready, and checks that
+// the platform kept a Camoufox engine.
 func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIModel, timeout time.Duration, what string, diags interface {
 	AddError(string, string)
 }) {
@@ -454,6 +456,14 @@ func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIMo
 	}
 	st, _ := statusOf(ctx, r.data.Client, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+	if ws, err := r.data.Client.Workloads(ctx); err == nil {
+		if w := findWorkload(ws, m.Name.ValueString()); w != nil && w.Type == "controller" {
+			var msg string
+			if m.Engine, msg = engineKept(m.Engine, w.Controller["engine"], "Browser API", m.Name.ValueString()); msg != "" {
+				diags.AddError("Camoufox isn't offered", msg)
+			}
+		}
+	}
 }
 
 func (r *browserAPIResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

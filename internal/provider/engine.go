@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -48,11 +49,14 @@ func readEngine(raw any) types.String {
 
 // engineReplace plans the engine and replaces the resource when it changes.
 // Left out of the configuration, the engine is Chrome. A state with no engine
-// (written by 0.12.0 or older) holds a Chrome browser: "chrome" over it is no
-// change, and while nothing else changes it keeps its null until a refresh
-// reads "chrome", so even a plan without refresh plans nothing. (A schema
-// default would plan "chrome" over that null, and the framework would then
-// plan every computed attribute again: an update with nothing to send.)
+// (written by 0.12.0 or older) holds no known engine, so no value over it
+// replaces: "chrome" plans nothing to send, and "camoufox" is an update the
+// platform checks (it keeps a Camoufox browser as it is and refuses to turn a
+// Chrome one into Camoufox). While nothing else changes such a state keeps its
+// null until a refresh reads the engine, so even a plan without refresh plans
+// nothing. (A schema default would plan "chrome" over that null, and the
+// framework would then plan every computed attribute again: an update with
+// nothing to send.)
 type engineReplace struct{}
 
 func (engineReplace) Description(context.Context) string {
@@ -81,15 +85,12 @@ func (engineReplace) PlanModifyString(_ context.Context, req planmodifier.String
 }
 
 // engineChanged: whether going from the stored engine to the planned one is
-// a change of engine. A null stored value is Chrome; an unknown planned value
+// a change of engine. Only a known stored engine can change: a null one
+// (a 0.12.0 state) or an unknown one is no change. An unknown planned value
 // may be another engine.
 func engineChanged(state, plan types.String) bool {
-	if state.IsUnknown() {
+	if state.IsUnknown() || state.IsNull() {
 		return false
-	}
-	was := engineChrome
-	if !state.IsNull() {
-		was = state.ValueString()
 	}
 	if plan.IsUnknown() {
 		return true
@@ -98,5 +99,22 @@ func engineChanged(state, plan types.String) bool {
 	if !plan.IsNull() {
 		now = plan.ValueString()
 	}
-	return was != now
+	return state.ValueString() != now
+}
+
+// engineKept checks that the platform kept the engine the configuration asked
+// for. A platform that doesn't know engines keeps none and makes a Chrome
+// browser; storing "camoufox" then would plan a replace on every run. It
+// answers the engine to store and, when the platform didn't keep Camoufox,
+// an error. raw is the engine the workload holds.
+func engineKept(planned types.String, raw any, what, name string) (types.String, string) {
+	if planned.ValueString() != engineCamoufox {
+		return planned, ""
+	}
+	held := readEngine(raw)
+	if held.ValueString() == engineCamoufox {
+		return planned, ""
+	}
+	return held, fmt.Sprintf("The platform made %q a Chrome %s: it doesn't offer Camoufox. "+
+		"Remove engine = \"camoufox\" to use a Chrome %s.", name, what, what)
 }

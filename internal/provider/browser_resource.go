@@ -1065,12 +1065,17 @@ func readRotation(prev *rotationModel, raw any) types.Object {
 
 // applied is the state after a create or update: the plan, with what only the
 // platform knows filled in (languages that follow locale, profiles_ready,
-// ready) and no write-only value.
-func (r *browserResource) applied(ctx context.Context, plan browserModel) browserModel {
+// ready) and no write-only value. A Camoufox engine the platform didn't keep
+// is an error, and the state holds the engine the platform made.
+func (r *browserResource) applied(ctx context.Context, plan browserModel, diags interface{ AddError(string, string) }) browserModel {
 	m := plan
 	var fromSpec *bool
 	if ws, err := r.data.Client.Workloads(ctx); err == nil {
 		if w := findWorkload(ws, plan.Name.ValueString()); w != nil {
+			var msg string
+			if m.Engine, msg = engineKept(plan.Engine, w.Browser["engine"], "browser", plan.Name.ValueString()); msg != "" {
+				diags.AddError("Camoufox isn't offered", msg)
+			}
 			read := readBrowser(ctx, plan, w.Browser, true)
 			if plan.Languages.IsUnknown() {
 				m.Languages = read.Languages
@@ -1137,7 +1142,7 @@ func (r *browserResource) Create(ctx context.Context, req resource.CreateRequest
 	if err := waitReady(waitCtx, r.data.Client, plan.Name.ValueString(), false); err != nil {
 		resp.Diagnostics.AddError("Browser did not become ready", err.Error())
 	}
-	plan = r.applied(ctx, plan)
+	plan = r.applied(ctx, plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -1197,7 +1202,7 @@ func (r *browserResource) Update(ctx context.Context, req resource.UpdateRequest
 	if err := waitReady(waitCtx, r.data.Client, w.ID, false); err != nil {
 		resp.Diagnostics.AddError("Browser did not become ready after update", err.Error())
 	}
-	plan = r.applied(ctx, plan)
+	plan = r.applied(ctx, plan, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
