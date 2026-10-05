@@ -591,6 +591,9 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
 	}
 }
 
+// vmBlock is a workload's machine settings.
+func vmBlock(w *client.Workload) map[string]any { return w.VM }
+
 // remoteKeys is the machine's own keys as the platform keeps them.
 func remoteKeys(vm map[string]any) []string {
 	raw, _ := vm["sshKeys"].([]any)
@@ -687,6 +690,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	refreshVMSpec(ctx, r.data.Client, &plan)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
+	settleMachineDatabases(ctx, r.data.Client, plan.Name.ValueString(), "machine", plan.Database, vmBlock, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -813,6 +817,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 	refreshVMSpec(ctx, r.data.Client, &plan)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
+	settleMachineDatabases(ctx, r.data.Client, w.ID, "machine", plan.Database, vmBlock, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

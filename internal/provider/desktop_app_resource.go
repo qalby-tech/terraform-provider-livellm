@@ -204,6 +204,9 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 	}
 }
 
+// desktopBlock is a workload's Desktop App settings.
+func desktopBlock(w *client.Workload) map[string]any { return w.Desktop }
+
 func refreshDesktopStatus(ctx context.Context, c *client.Client, m *desktopAppModel) {
 	st, _ := statusOf(ctx, c, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
@@ -252,6 +255,7 @@ func (r *desktopAppResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 	refreshDesktopStatus(ctx, r.data.Client, &plan)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
+	settleMachineDatabases(ctx, r.data.Client, plan.Name.ValueString(), "Desktop App", plan.Database, desktopBlock, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -300,6 +304,7 @@ func (r *desktopAppResource) Update(ctx context.Context, req resource.UpdateRequ
 	}
 	refreshDesktopStatus(ctx, r.data.Client, &plan)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
+	settleMachineDatabases(ctx, r.data.Client, w.ID, "Desktop App", plan.Database, desktopBlock, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

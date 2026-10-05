@@ -1,11 +1,16 @@
 package provider
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
+	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
 // A machine's or a Desktop App's database blocks: reach only. The link lets
@@ -26,8 +31,9 @@ func machineDatabaseBlock(what string) schema.ListNestedBlock {
 	return schema.ListNestedBlock{
 		Description: fmt.Sprintf("A database of the workspace this %s may reach (at most %d). Reach only: nothing is "+
 			"put into the %s (no variables) and nothing restarts; connect with the database's own address and login. "+
-			"A database is reached only by what links it, and it can't be deleted while a %s links it. Linking a "+
-			"database this API key didn't make needs a key with the Network permission.", what, maxDatabaseLinks, what, what),
+			"A database is reached only by what links it, and it can't be deleted while a %s links it. Through an "+
+			"API key the link needs the Network permission unless the key made both this %s and the database.",
+			what, maxDatabaseLinks, what, what, what),
 		NestedObject: schema.NestedBlockObject{
 			Attributes: map[string]schema.Attribute{
 				"name": schema.StringAttribute{
@@ -125,4 +131,42 @@ func readMachineDatabases(sp map[string]any) types.List {
 		}))
 	}
 	return types.ListValueMust(objType, vals)
+}
+
+// settleMachineDatabases checks after a write that the platform kept the
+// database blocks as written. The state keeps the plan (Terraform holds an
+// apply to it); when the platform holds other links, a platform older than
+// this provider having dropped them, a warning says so at the apply instead
+// of a difference turning up only at the next plan. block picks the
+// workload's machine or desktop settings.
+func settleMachineDatabases(ctx context.Context, c *client.Client, id, what string, planned types.List,
+	block func(*client.Workload) map[string]any, diags *diag.Diagnostics) {
+	if planned.IsUnknown() {
+		return
+	}
+	ws, err := c.Workloads(ctx)
+	if err != nil {
+		return
+	}
+	w := findWorkload(ws, id)
+	if w == nil {
+		return
+	}
+	held := machineDatabaseNames(readMachineDatabases(block(w)))
+	want := machineDatabaseNames(planned)
+	if sameNames(held, want) {
+		return
+	}
+	diags.AddWarning("Database links not kept as written",
+		fmt.Sprintf("%q links %s, not %s. A platform older than this provider doesn't keep a %s's database "+
+			"links, so the %s can't reach those databases: the next plan shows the difference.",
+			id, describeLinks(held), describeLinks(want), what, what))
+}
+
+// describeLinks writes database names out for a message.
+func describeLinks(names []string) string {
+	if len(names) == 0 {
+		return "no database"
+	}
+	return strings.Join(names, ", ")
 }
