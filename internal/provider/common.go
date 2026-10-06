@@ -16,9 +16,11 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// apiDiag turns a client error into an actionable diagnostic. The one case
-// with dedicated wording is 402: the workspace plan's resource pool is
-// exhausted — the fix is a plan change, not a config change.
+// apiDiag turns a client error into an actionable diagnostic. Two cases have
+// dedicated wording: 402, the workspace plan's resource pool is exhausted (the
+// fix is a plan change, not a config change), and a 403 that names proxies,
+// which only a platform from before the proxies permission was dropped sends:
+// it is shown in the platform's words and says where it comes from.
 func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) && apiErr.Status == 402 {
@@ -27,6 +29,15 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 			fmt.Sprintf("%s: %s\n\nThe workspace's plan does not have enough free CPU/RAM/disk for this. "+
 				"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, "+
 				"or free resources first.", summary, apiErr.Body),
+		)
+		return
+	}
+	if errors.As(err, &apiErr) && apiErr.Status == 403 && strings.Contains(strings.ToLower(apiErr.Message()), "prox") {
+		diags.AddError(
+			summary,
+			fmt.Sprintf("%s: %s\n\nThis is an older platform: it still asks the API key for the proxies permission "+
+				"before a proxy change (newer platforms don't). A person can turn it on for the key on the API "+
+				"keys page; until then leave the proxy block as it is.", summary, apiErr.Message()),
 		)
 		return
 	}

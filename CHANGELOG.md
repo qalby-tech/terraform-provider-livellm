@@ -2,11 +2,13 @@
 
 ## 0.13.1
 
-- Changing a browser's `proxy` no longer needs a permission on the API key:
-  the 0.12.0 **proxies** permission is gone from the platform, and so is the
-  provider's own message for it. A refusal is shown with the platform's words.
-  Agree a proxy change with the people who use the browser first: it changes
-  where its traffic goes and the address sites see.
+- Changing a browser's `proxy` no longer needs a permission on the API key
+  once the platform has dropped the 0.12.0 **proxies** permission. An older
+  platform still refuses the change without it: that refusal is shown in the
+  platform's words and says it comes from an older platform.
+- Before you change a browser's proxy, ask the user and wait for their
+  agreement: it changes where the browser's traffic goes and the address sites
+  see.
 
 ## 0.13.0
 

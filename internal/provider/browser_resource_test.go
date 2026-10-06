@@ -663,17 +663,20 @@ func TestUpstreamLoginShape(t *testing.T) {
 // platform's refusal) is passed on with the platform's words under the
 // operation's own summary, never as a missing key permission.
 func TestProxyRefusalPassedOn(t *testing.T) {
-	msg := "This API key can't change browser proxies. A person can give it the proxies permission on the Keys page."
+	// The quotes in the message are escaped in the JSON body, so a detail made
+	// from the raw body would not contain it: the detail must carry the
+	// platform's words, not the answer's JSON.
+	msg := `This API key can't change browser "proxies". A person can give it the proxies permission on the Keys page.`
 	body, _ := json.Marshal(map[string]string{"error": msg})
 	var diags diag.Diagnostics
 	apiDiag(&diags, "Cannot update browser", &client.APIError{Status: 403, Body: string(body)})
 	if len(diags) != 1 || diags[0].Summary() != "Cannot update browser" || !strings.Contains(diags[0].Detail(), msg) ||
-		strings.Contains(diags[0].Detail(), "leave the proxy block") {
+		strings.Contains(diags[0].Detail(), `{"error"`) || !strings.Contains(diags[0].Detail(), "older platform") {
 		t.Errorf("proxy 403: %v", diags)
 	}
 	diags = nil
 	apiDiag(&diags, "Cannot update browser", &client.APIError{Status: 403, Body: `{"error":"forbidden"}`})
-	if len(diags) != 1 || diags[0].Summary() != "Cannot update browser" {
+	if len(diags) != 1 || diags[0].Summary() != "Cannot update browser" || strings.Contains(diags[0].Detail(), "older platform") {
 		t.Errorf("other 403: %v", diags)
 	}
 	diags = nil
