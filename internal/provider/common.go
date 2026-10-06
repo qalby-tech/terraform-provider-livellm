@@ -16,7 +16,7 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// apiDiag turns a client error into an actionable diagnostic. Two cases have
+// apiDiag turns a client error into an actionable diagnostic. Three cases have
 // dedicated wording: 402, the workspace plan's resource pool is exhausted (the
 // fix is a plan change, not a config change); a 403 for letting one resource
 // reach another without the Network permission; and a 403 that names proxies,
