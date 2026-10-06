@@ -30,15 +30,6 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 		)
 		return
 	}
-	if errors.As(err, &apiErr) && apiErr.Status == 403 && strings.Contains(strings.ToLower(apiErr.Message()), "prox") {
-		diags.AddError(
-			"This key can't change browser proxies",
-			fmt.Sprintf("%s: %s\n\nThe platform refused the proxy change for this API key. A person can give the key "+
-				"the proxies permission on the workspace's API keys page; until then leave the proxy block as it is.",
-				summary, apiErr.Message()),
-		)
-		return
-	}
 	diags.AddError(summary, err.Error())
 }
 

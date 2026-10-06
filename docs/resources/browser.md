@@ -125,10 +125,10 @@ locales on offer are listed at `GET /v1/browsers/locales`.
 - The proxy covers the browser as LiveLLM starts it. A client connected to it
   over CDP can open a context that goes around the proxy, and so can an
   extension with the `proxy` permission.
-- Changing the proxy needs a person's go: the API key needs the **proxies**
-  permission, which a person turns on on the Keys page. Without it, a plan
-  that changes the proxy fails at apply with the platform's message. An update
-  that leaves the proxy alone, such as a new `cpu`, still works.
+- Changing the proxy changes where the browser's traffic goes and the address
+  sites see, so agree it with the people who use the browser first. The API
+  key needs no permission of its own for it. An update that leaves the proxy
+  alone, such as a new `cpu`, sends nothing about it.
 
 ### Settings made in the console
 

@@ -659,16 +659,18 @@ func TestUpstreamLoginShape(t *testing.T) {
 	}
 }
 
-// A key without the proxies permission gets the platform's own words.
-func TestProxyRefusalDiagnostic(t *testing.T) {
+// A proxy change takes no key permission: a 403 that names proxies (an older
+// platform's refusal) is passed on with the platform's words under the
+// operation's own summary, never as a missing key permission.
+func TestProxyRefusalPassedOn(t *testing.T) {
 	msg := "This API key can't change browser proxies. A person can give it the proxies permission on the Keys page."
 	body, _ := json.Marshal(map[string]string{"error": msg})
 	var diags diag.Diagnostics
 	apiDiag(&diags, "Cannot update browser", &client.APIError{Status: 403, Body: string(body)})
-	if len(diags) != 1 || !strings.Contains(diags[0].Summary(), "proxies") || !strings.Contains(diags[0].Detail(), msg) {
-		t.Errorf("diagnostic: %v", diags)
+	if len(diags) != 1 || diags[0].Summary() != "Cannot update browser" || !strings.Contains(diags[0].Detail(), msg) ||
+		strings.Contains(diags[0].Detail(), "leave the proxy block") {
+		t.Errorf("proxy 403: %v", diags)
 	}
-	// Any other refusal is passed on as it was.
 	diags = nil
 	apiDiag(&diags, "Cannot update browser", &client.APIError{Status: 403, Body: `{"error":"forbidden"}`})
 	if len(diags) != 1 || diags[0].Summary() != "Cannot update browser" {
@@ -684,7 +686,7 @@ func TestProxyRefusalDiagnostic(t *testing.T) {
 // A configuration without the newer settings leaves them to the console:
 // a locale, a time zone, a geolocation and a proxy a person set there are not
 // read into state, plan nothing, and an update sends only what 0.11.0 sent,
-// so a key without the proxies permission can still change cpu.
+// so an update that changes cpu says nothing about the proxy.
 func TestConsoleSettingsKeptWithoutConfiguration(t *testing.T) {
 	ctx := context.Background()
 	m := baseBrowser()

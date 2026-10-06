@@ -209,7 +209,8 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					"once; changing it later does not. With no upstream the browser goes out directly. " +
 					"Removing the block restarts it. The proxy applies to the browser as LiveLLM starts it: " +
 					"anything that connects to it (CDP) can open a context that goes around it. Changing it " +
-					"needs a key with the proxies permission.",
+					"changes where the browser's traffic goes and the address sites see: agree a change with " +
+					"the people who use the browser first.",
 				Attributes: map[string]schema.Attribute{
 					"auth_version": schema.Int64Attribute{
 						Optional: true,
