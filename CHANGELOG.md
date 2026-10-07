@@ -16,8 +16,8 @@
   back as the platform holds it (`"1"`, or nothing for one made through the
   API without a version). A plan that removes its allowlist while its console
   stays on warns: the console's address also answers S3 requests. So does
-  every plan while a console turned on in the dashboard stays on with
-  `admin_console` left out and no `allowlist` or `expose`.
+  every plan while its console is on with `admin_console` left out (turned
+  on in the dashboard, for one) and no `allowlist` or `expose`.
 - **Added** `admin_console` to `livellm_storage`, for every engine: pgAdmin,
   Redis Commander, or the RustFS console for object storage. Left out, the
   console keeps the state it has, so an apply no longer turns off a console

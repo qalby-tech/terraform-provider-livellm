@@ -625,3 +625,60 @@ func TestConsolePasswordWarning(t *testing.T) {
 		}
 	}
 }
+
+// ModifyPlan reads admin_console from the configuration and attaches each
+// warning to its attribute on a real update plan.
+func TestStorageModifyPlanWarnings(t *testing.T) {
+	ctx := context.Background()
+	var sr resource.SchemaResponse
+	(&storageResource{}).Schema(ctx, resource.SchemaRequest{}, &sr)
+	typ := sr.Schema.Type().TerraformType(ctx).(tftypes.Object)
+	value := func(set map[string]tftypes.Value) tftypes.Value {
+		vals := map[string]tftypes.Value{}
+		for name, at := range typ.AttributeTypes {
+			vals[name] = tftypes.NewValue(at, nil)
+		}
+		vals["name"] = tftypes.NewValue(tftypes.String, "files")
+		vals["engine"] = tftypes.NewValue(tftypes.String, "s3")
+		vals["password_wo_version"] = tftypes.NewValue(tftypes.Number, 1)
+		for k, v := range set {
+			vals[k] = v
+		}
+		return tftypes.NewValue(typ, vals)
+	}
+	on := tftypes.NewValue(tftypes.Bool, true)
+	off := tftypes.NewValue(tftypes.Bool, false)
+	for _, c := range []struct {
+		name          string
+		config, plan  map[string]tftypes.Value
+		state         map[string]tftypes.Value
+		wantWarningOn []string
+	}{
+		{"console kept on, left out", nil, map[string]tftypes.Value{"admin_console": on},
+			map[string]tftypes.Value{"admin_console": on}, []string{"admin_console"}},
+		{"console turned on", map[string]tftypes.Value{"admin_console": on}, map[string]tftypes.Value{"admin_console": on},
+			map[string]tftypes.Value{"admin_console": off}, []string{"password_wo"}},
+		{"nothing to say", map[string]tftypes.Value{"admin_console": off}, map[string]tftypes.Value{"admin_console": off},
+			map[string]tftypes.Value{"admin_console": off}, nil},
+	} {
+		req := resource.ModifyPlanRequest{
+			Config: tfsdk.Config{Schema: sr.Schema, Raw: value(c.config)},
+			Plan:   tfsdk.Plan{Schema: sr.Schema, Raw: value(c.plan)},
+			State:  tfsdk.State{Schema: sr.Schema, Raw: value(c.state)},
+		}
+		resp := &resource.ModifyPlanResponse{Plan: req.Plan}
+		(&storageResource{}).ModifyPlan(ctx, req, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("%s: %v", c.name, resp.Diagnostics)
+		}
+		var got []string
+		for _, d := range resp.Diagnostics.Warnings() {
+			if wp, ok := d.(diag.DiagnosticWithPath); ok {
+				got = append(got, wp.Path().String())
+			}
+		}
+		if !reflect.DeepEqual(got, c.wantWarningOn) {
+			t.Errorf("%s: warnings on %v, want %v", c.name, got, c.wantWarningOn)
+		}
+	}
+}

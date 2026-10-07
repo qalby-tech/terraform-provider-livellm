@@ -500,10 +500,10 @@ func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 }
 
 // consoleOpenWarning warns when an object storage's console stays on although
-// the configuration leaves admin_console out (it was switched on elsewhere,
-// in the dashboard or through the API), with no allowlist and no expose: the
-// console's address answers S3 requests from any network although the
-// configuration never asked for a public address.
+// the configuration leaves admin_console out (switched on in the dashboard or
+// through the API, or by a line since removed), with no allowlist and no
+// expose: the console's address answers S3 requests from any network
+// although the configuration never asked for a public address.
 func consoleOpenWarning(plan storageModel, configConsole types.Bool) *[2]string {
 	if plan.Engine.ValueString() != "s3" || !configConsole.IsNull() {
 		return nil
@@ -515,7 +515,7 @@ func consoleOpenWarning(plan storageModel, configConsole types.Bool) *[2]string 
 		return nil
 	}
 	return &[2]string{"The object storage's console is on and open to any network",
-		"Its console was turned on outside this configuration and stays on while admin_console is left out. " +
+		"Its console is on and stays on while the configuration leaves admin_console out. " +
 			"Its address also answers S3 requests signed with the keys, from any network. Set admin_console = false " +
 			"to turn it off, or set allowlist to limit it."}
 }

@@ -121,9 +121,9 @@ resource "livellm_storage" "files" {
   signs in with the access key and secret key. Its address also answers S3
   requests signed with the keys. `allowlist` limits both addresses. An apply
   that removes the allowlist while the console stays on warns at plan time;
-  `allowlist = []` opens them on purpose. A console turned on in the
-  dashboard while the configuration leaves `admin_console` out, with no
-  `allowlist` and no `expose`, warns at every plan: set
+  `allowlist = []` opens them on purpose. A console that is on while the
+  configuration leaves `admin_console` out (turned on in the dashboard, for
+  one), with no `allowlist` and no `expose`, warns at every plan: set
   `admin_console = false` to turn it off, or set `allowlist`.
 - `endpoints` lists `s3` (inside the workspace, `http://…:9000`) and, with
   `expose`, `s3-external`.
