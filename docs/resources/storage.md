@@ -121,7 +121,10 @@ resource "livellm_storage" "files" {
   signs in with the access key and secret key. Its address also answers S3
   requests signed with the keys. `allowlist` limits both addresses. An apply
   that removes the allowlist while the console stays on warns at plan time;
-  `allowlist = []` opens them on purpose.
+  `allowlist = []` opens them on purpose. A console turned on in the
+  dashboard while the configuration leaves `admin_console` out, with no
+  `allowlist` and no `expose`, warns at every plan: set
+  `admin_console = false` to turn it off, or set `allowlist`.
 - `endpoints` lists `s3` (inside the workspace, `http://…:9000`) and, with
   `expose`, `s3-external`.
 
@@ -132,7 +135,9 @@ Redis Commander for Redis, the RustFS console for object storage. Left out,
 the console keeps the state it has, also one switched on in the dashboard.
 Turning it on sends `password_wo` in the same apply (the platform needs it,
 since the console signs in with it), so keep `password_wo` set to the current
-password. pgAdmin and Redis Commander answer from any network and sign in
+password: a different one changes the password (for object storage, its
+secret key) although the plan shows only `admin_console`. A plan that turns
+the console on without a new `password_wo_version` warns about it. pgAdmin and Redis Commander answer from any network and sign in
 with `admin` and the database password: `allowlist` covers only the database's
 exposed address. For object storage it covers the console too.
 
@@ -172,7 +177,7 @@ resource "livellm_storage" "eu_db" {
 - `username` (String) Application username (Postgres), or an object storage's access key. Left out, the platform names it `app` (an object storage gets a generated access key), and leaving it out later keeps the name the database has. Changing it replaces the database.
 - `expose` (Boolean) Expose the database externally over TLS. An object storage gets an HTTPS S3 address, path-style.
 - `allowlist` (List of String) Client CIDRs/IPs allowed when exposed. Empty = no IP restriction. It covers the database's exposed address only, not pgAdmin or Redis Commander; for an object storage it covers its S3 address and its admin console's.
-- `admin_console` (Boolean) The admin console (pgAdmin, Redis Commander, or the RustFS console for object storage). pgAdmin and Redis Commander answer from any network and sign in with `admin` and the database password. Left out, it keeps the state the database has. Turning it on sends `password_wo` in the same apply; for object storage that restarts it for a few seconds.
+- `admin_console` (Boolean) The admin console (pgAdmin, Redis Commander, or the RustFS console for object storage). pgAdmin and Redis Commander answer from any network and sign in with `admin` and the database password. Left out, it keeps the state the database has. Turning it on sends `password_wo` in the same apply (a plan doing it without a new `password_wo_version` warns); for object storage that restarts it for a few seconds.
 - `backup` (Block) Backups, Postgres only (object storage keeps one copy and has none). With the block backups are on; without it they are off (a plan shows backups turned on or off elsewhere as a change).
   - `mode` (String) `daily` (the default): a full copy each night. `continuous`: the nightly copy plus every change in between, restorable to any minute inside `keep_days`. `manual`: nothing scheduled; backups taken by hand are kept.
   - `keep_days` (Number) How many days backups are kept, `1`..`365`; `10` when unset.
@@ -191,6 +196,9 @@ resource "livellm_storage" "eu_db" {
 terraform import livellm_storage.db app-db
 ```
 
-An import reads every setting the platform holds, an object storage's
-`version = "1"` included: a configuration that leaves `version` out plans one
-update that changes nothing on the platform, then plans clean.
+An import reads every setting the platform holds. An object storage's
+`version` reads back as the platform holds it: `"1"` for one made in the
+dashboard, nothing for one made through the API without a version. Where the
+two differ from the configuration (`version` left out, or `version = "1"`
+for one that holds none), the first plan after the import shows one update
+that changes nothing on the platform, then plans clean.

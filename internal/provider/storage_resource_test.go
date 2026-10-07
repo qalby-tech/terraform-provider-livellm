@@ -6,9 +6,12 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
@@ -365,6 +368,12 @@ func TestKeepAdminConsoleWhenUnset(t *testing.T) {
 	obj := tftypes.Object{AttributeTypes: map[string]tftypes.Type{}}
 	saved := tfsdk.State{Raw: tftypes.NewValue(obj, map[string]tftypes.Value{})}
 	creating := tfsdk.State{Raw: tftypes.NewValue(obj, nil)}
+	var sr resource.SchemaResponse
+	(&storageResource{}).Schema(ctx, resource.SchemaRequest{}, &sr)
+	mods := sr.Schema.Attributes["admin_console"].(schema.BoolAttribute).PlanModifiers
+	if len(mods) == 0 {
+		t.Fatal("admin_console has no plan modifiers")
+	}
 	on, off := types.BoolValue(true), types.BoolValue(false)
 	for _, c := range []struct {
 		name          string
@@ -382,12 +391,37 @@ func TestKeepAdminConsoleWhenUnset(t *testing.T) {
 		if plan.IsNull() {
 			plan = types.BoolUnknown()
 		}
-		resp := &planmodifier.BoolResponse{PlanValue: plan}
-		keepSizeWhenUnset{}.PlanModifyBool(ctx, planmodifier.BoolRequest{
-			State: c.state, ConfigValue: c.config, StateValue: c.prior, PlanValue: plan,
-		}, resp)
-		if !resp.PlanValue.Equal(c.want) {
-			t.Errorf("%s: planned %v, want %v", c.name, resp.PlanValue, c.want)
+		for _, m := range mods {
+			resp := &planmodifier.BoolResponse{PlanValue: plan}
+			m.PlanModifyBool(ctx, planmodifier.BoolRequest{
+				State: c.state, ConfigValue: c.config, StateValue: c.prior, PlanValue: plan,
+			}, resp)
+			plan = resp.PlanValue
+		}
+		if !plan.Equal(c.want) {
+			t.Errorf("%s: planned %v, want %v", c.name, plan, c.want)
+		}
+	}
+}
+
+// The schema offers object storage as an engine, next to Postgres and Redis.
+func TestStorageEngineSchema(t *testing.T) {
+	ctx := context.Background()
+	var sr resource.SchemaResponse
+	(&storageResource{}).Schema(ctx, resource.SchemaRequest{}, &sr)
+	vals := sr.Schema.Attributes["engine"].(schema.StringAttribute).Validators
+	if len(vals) == 0 {
+		t.Fatal("engine has no validators")
+	}
+	for engine, ok := range map[string]bool{"postgres": true, "redis": true, "s3": true, "mysql": false} {
+		var errs diag.Diagnostics
+		for _, v := range vals {
+			resp := &validator.StringResponse{}
+			v.ValidateString(ctx, validator.StringRequest{Path: path.Root("engine"), ConfigValue: types.StringValue(engine)}, resp)
+			errs.Append(resp.Diagnostics...)
+		}
+		if errs.HasError() == ok {
+			t.Errorf("engine %q: refused %v, want refused %v", engine, errs.HasError(), !ok)
 		}
 	}
 }
@@ -436,6 +470,8 @@ func TestObjectStorageVersionReadBack(t *testing.T) {
 		{"s3 left out", "s3", types.StringNull(), false, "1", types.StringNull()},
 		{"s3 written", "s3", types.StringValue("1"), false, "1", types.StringValue("1")},
 		{"s3 imported", "s3", types.StringNull(), true, "1", types.StringValue("1")},
+		{"s3 imported, none stored", "s3", types.StringNull(), true, "", types.StringNull()},
+		{"s3 left out, none stored", "s3", types.StringNull(), false, "", types.StringNull()},
 		{"postgres left out", "postgres", types.StringNull(), false, "16", types.StringValue("16")},
 		{"postgres imported", "postgres", types.StringNull(), true, "16", types.StringValue("16")},
 	} {
@@ -521,6 +557,70 @@ func TestConsoleAllowlistWarning(t *testing.T) {
 		plan.AdminConsole, plan.Allowlist = c.console, c.planned
 		state.AdminConsole, state.Allowlist = types.BoolValue(true), c.state
 		if got := consoleAllowlistWarning(plan, state); (got != nil) != c.wantWarns {
+			t.Errorf("%s: warning %v, want one: %v", c.name, got, c.wantWarns)
+		}
+	}
+}
+
+// An object storage's console that stays on although the configuration leaves
+// it out, with no allowlist and no expose, warns; one asked for, limited or
+// exposed on purpose does not.
+func TestConsoleOpenWarning(t *testing.T) {
+	list := types.ListValueMust(types.StringType, []attr.Value{types.StringValue("203.0.113.0/24")})
+	empty := types.ListValueMust(types.StringType, []attr.Value{})
+	null := types.ListNull(types.StringType)
+	on, off := types.BoolValue(true), types.BoolValue(false)
+	for _, c := range []struct {
+		name      string
+		engine    string
+		config    types.Bool
+		console   types.Bool
+		expose    types.Bool
+		list      types.List
+		wantWarns bool
+	}{
+		{"kept on, no list", "s3", types.BoolNull(), on, types.BoolNull(), null, true},
+		{"kept on, empty list", "s3", types.BoolNull(), on, off, empty, true},
+		{"kept on, list", "s3", types.BoolNull(), on, types.BoolNull(), list, false},
+		{"kept on, exposed", "s3", types.BoolNull(), on, on, null, false},
+		{"configured on", "s3", on, on, types.BoolNull(), null, false},
+		{"kept off", "s3", types.BoolNull(), off, types.BoolNull(), null, false},
+		{"unknown", "s3", types.BoolNull(), types.BoolUnknown(), types.BoolNull(), null, false},
+		{"postgres kept on", "postgres", types.BoolNull(), on, types.BoolNull(), null, false},
+	} {
+		plan := baseStorage(c.engine)
+		plan.AdminConsole, plan.Expose, plan.Allowlist = c.console, c.expose, c.list
+		if got := consoleOpenWarning(plan, c.config); (got != nil) != c.wantWarns {
+			t.Errorf("%s: warning %v, want one: %v", c.name, got, c.wantWarns)
+		}
+	}
+}
+
+// Turning the console on without a new password_wo_version warns, for every
+// engine: the apply sends password_wo, which changes the password when it is
+// not the current one.
+func TestConsolePasswordWarning(t *testing.T) {
+	m := func(engine string, version int64, console types.Bool) storageModel {
+		s := baseStorage(engine)
+		s.PasswordWOVersion = types.Int64Value(version)
+		s.AdminConsole = console
+		return s
+	}
+	on, off := types.BoolValue(true), types.BoolValue(false)
+	for _, c := range []struct {
+		name        string
+		plan, state storageModel
+		wantWarns   bool
+	}{
+		{"s3 turned on", m("s3", 1, on), m("s3", 1, off), true},
+		{"postgres turned on", m("postgres", 1, on), m("postgres", 1, off), true},
+		{"turned on from a state without it", m("redis", 1, on), m("redis", 1, types.BoolNull()), true},
+		{"turned on with a new version", m("s3", 2, on), m("s3", 1, off), false},
+		{"already on", m("s3", 1, on), m("s3", 1, on), false},
+		{"turned off", m("s3", 1, off), m("s3", 1, on), false},
+		{"unknown", m("s3", 1, types.BoolUnknown()), m("s3", 1, off), false},
+	} {
+		if got := consolePasswordWarning(c.plan, c.state); (got != nil) != c.wantWarns {
 			t.Errorf("%s: warning %v, want one: %v", c.name, got, c.wantWarns)
 		}
 	}

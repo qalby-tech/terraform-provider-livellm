@@ -140,7 +140,8 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					"network and sign in with `admin` and the database password (allowlist covers only the object storage " +
 					"console). Left out, the console keeps the state it " +
 					"has, also one switched on in the dashboard. Turning it on sends password_wo in the same apply, " +
-					"since the platform needs it; for object storage that restarts it for a few seconds.",
+					"since the platform needs it (a plan doing it without a new password_wo_version warns); for " +
+					"object storage that restarts it for a few seconds.",
 				PlanModifiers: []planmodifier.Bool{keepSizeWhenUnset{}},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the database is up."},
@@ -483,9 +484,63 @@ func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var configConsole types.Bool
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("admin_console"), &configConsole)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if w := consoleAllowlistWarning(plan, state); w != nil {
 		resp.Diagnostics.AddAttributeWarning(path.Root("allowlist"), w[0], w[1])
+	} else if w := consoleOpenWarning(plan, configConsole); w != nil {
+		resp.Diagnostics.AddAttributeWarning(path.Root("admin_console"), w[0], w[1])
 	}
+	if w := consolePasswordWarning(plan, state); w != nil {
+		resp.Diagnostics.AddAttributeWarning(path.Root("password_wo"), w[0], w[1])
+	}
+}
+
+// consoleOpenWarning warns when an object storage's console stays on although
+// the configuration leaves admin_console out (it was switched on elsewhere,
+// in the dashboard or through the API), with no allowlist and no expose: the
+// console's address answers S3 requests from any network although the
+// configuration never asked for a public address.
+func consoleOpenWarning(plan storageModel, configConsole types.Bool) *[2]string {
+	if plan.Engine.ValueString() != "s3" || !configConsole.IsNull() {
+		return nil
+	}
+	if plan.AdminConsole.IsUnknown() || !plan.AdminConsole.ValueBool() || plan.Expose.ValueBool() {
+		return nil
+	}
+	if !plan.Allowlist.IsNull() && (plan.Allowlist.IsUnknown() || len(plan.Allowlist.Elements()) > 0) {
+		return nil
+	}
+	return &[2]string{"The object storage's console is on and open to any network",
+		"Its console was turned on outside this configuration and stays on while admin_console is left out. " +
+			"Its address also answers S3 requests signed with the keys, from any network. Set admin_console = false " +
+			"to turn it off, or set allowlist to limit it."}
+}
+
+// consolePasswordWarning warns when an apply turns the console on without a
+// new password_wo_version: the platform needs the password to turn it on, so
+// the apply sends password_wo, and one that is not the current password
+// changes it without the plan showing it.
+func consolePasswordWarning(plan, state storageModel) *[2]string {
+	if plan.AdminConsole.IsUnknown() || !plan.AdminConsole.ValueBool() || state.AdminConsole.ValueBool() {
+		return nil
+	}
+	if !plan.PasswordWOVersion.Equal(state.PasswordWOVersion) {
+		return nil // a new password is sent on purpose
+	}
+	what := "the database's password"
+	after := ""
+	if plan.Engine.ValueString() == "s3" {
+		what = "the object storage's secret key"
+		after = "A new secret key restarts the object storage for a few seconds, and linked apps read it when they restart. "
+	}
+	return &[2]string{"Turning the console on sends password_wo",
+		"The platform needs the password to turn the console on, so this apply sends password_wo. If it is not " +
+			"the current password, the apply changes " + what + ". " + after + "Keep password_wo set to the " +
+			"current password."}
 }
 
 // consoleAllowlistWarning warns when an apply removes an object storage's
@@ -634,7 +689,8 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 // readStorage fills the state from the database's settings on the platform.
 // A first read after an import takes object storage's version as the platform
-// has it, as for any database, so a configuration that names it plans clean.
+// holds it, as for any database; a version it has not stored (one made
+// through the API without one) reads back as left out.
 func readStorage(state *storageModel, sp map[string]any, imported bool) {
 	if v, ok := sp["engine"].(string); ok {
 		state.Engine = types.StringValue(v)

@@ -13,15 +13,19 @@
   `instances` other than `1`, a `version` other than `"1"` and a secret key
   with a space, tab or line break at either end are refused at plan time, and
   an update says nothing about backups for it. An import reads its version
-  back, so a configuration with `version = "1"` plans clean after it. A plan
-  that removes its allowlist while its console stays on warns: the console's
-  address also answers S3 requests.
+  back as the platform holds it (`"1"`, or nothing for one made through the
+  API without a version). A plan that removes its allowlist while its console
+  stays on warns: the console's address also answers S3 requests. So does
+  every plan while a console turned on in the dashboard stays on with
+  `admin_console` left out and no `allowlist` or `expose`.
 - **Added** `admin_console` to `livellm_storage`, for every engine: pgAdmin,
   Redis Commander, or the RustFS console for object storage. Left out, the
   console keeps the state it has, so an apply no longer turns off a console
   switched on in the dashboard; a refresh and an import read it back. Turning
   it on sends `password_wo` in the same apply, since the platform now needs
-  the password to turn a console on. pgAdmin and Redis Commander answer from
+  the password to turn a console on; a plan that does so without a new
+  `password_wo_version` warns, since a `password_wo` other than the current
+  password changes it. pgAdmin and Redis Commander answer from
   any network (signed in with `admin` and the database password); `allowlist`
   doesn't cover them.
 - `livellm_container_app`'s `database` block takes an object storage's
