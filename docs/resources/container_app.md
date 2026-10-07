@@ -104,6 +104,41 @@ resource "livellm_container_app" "cloud" {
 }
 ```
 
+An app linked to an object storage (`engine = "s3"`) with the variables AWS
+SDKs and the AWS CLI read. S3 clients must use path-style addressing; the
+bucket `app` is made with the object storage. The object storage keeps one
+copy of your files and has no backups.
+
+```terraform
+resource "livellm_storage" "files" {
+  name                = "files"
+  engine              = "s3"
+  disk_gi             = 20
+  password_wo         = var.files_secret_key
+  password_wo_version = 1
+}
+
+resource "livellm_container_app" "uploads" {
+  name  = "uploads"
+  image = "ghcr.io/acme/uploads:1.4"
+
+  database {
+    name = livellm_storage.files.name
+    env = {
+      AWS_ENDPOINT_URL_S3   = "endpoint"
+      AWS_ACCESS_KEY_ID     = "accessKey"
+      AWS_SECRET_ACCESS_KEY = "secretKey"
+      AWS_REGION            = "region"
+      S3_BUCKET             = "bucket"
+    }
+  }
+}
+```
+
+The link gives the object storage's own keys, which can do everything in it.
+For an app you trust less, make it a key of its own in the object storage's
+admin console (limited to one bucket) and pass that in `secret_env` instead.
+
 A reach-only link: the app may connect to the database and takes no
 variables from it (it has its own settings), so the block adds no wait, and
 adding or removing it never restarts the app.
@@ -317,14 +352,22 @@ resource "livellm_container_app" "near" {
   - `name` (String, Required) The database's name, e.g. `livellm_storage.db.name` (which also has Terraform create the database first and delete it last).
   - `env` (Map of String) Environment variable name → the detail it carries:
 
-    | Detail | PostgreSQL | Redis |
-    |---|---|---|
-    | `host` | its private address | its private address |
-    | `port` | `5432` | `6379` |
-    | `database` | `app` | — |
-    | `username` | the login's name | — |
-    | `password` | the password | the password |
-    | `url` | `postgres://user:password@host:5432/app` | `redis://:password@host:6379` |
+    | Detail | PostgreSQL | Redis | Object storage (`s3`) |
+    |---|---|---|---|
+    | `host` | its private address | its private address | its private address |
+    | `port` | `5432` | `6379` | `9000` |
+    | `database` | `app` | — | — |
+    | `username` | the login's name | — | — |
+    | `password` | the password | the password | — |
+    | `url` | `postgres://user:password@host:5432/app` | `redis://:password@host:6379` | — |
+    | `endpoint` | — | — | `http://<host>:9000` |
+    | `region` | — | — | `us-east-1` |
+    | `bucket` | — | — | `app` (made with it) |
+    | `accessKey` | — | — | the access key |
+    | `secretKey` | — | — | the secret key |
+
+    The plan checks that a detail is one of these; the apply refuses one the
+    linked database's engine doesn't give.
 
     0 to 12 variables per block. A variable name is letters, digits and `_`,
     not starting with a digit, and is used once in the app, across `env`,
@@ -336,8 +379,9 @@ resource "livellm_container_app" "near" {
 
   The link lets the app, with every service of its `stack`, reach the
   database: a database has no `reachable_from` and is reached only by what
-  links it. The password and `url` come from the database's stored login:
-  nothing secret is written to the app's settings or to state. A database the
+  links it. The password and `url` come from the database's stored login (an
+  object storage's `secretKey` from its stored keys): nothing secret is
+  written to the app's settings or to state. A database the
   link takes variables from is waited for before the app starts (no
   `starts_after` needed), and a linked database can't be deleted while an app
   links it. Through an API key the link needs the **Network** permission

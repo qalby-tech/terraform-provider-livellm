@@ -29,7 +29,7 @@ var machineDatabaseAttrTypes = map[string]attr.Type{"name": types.StringType}
 // ("machine", "Desktop App").
 func machineDatabaseBlock(what string) schema.ListNestedBlock {
 	return schema.ListNestedBlock{
-		Description: fmt.Sprintf("A database of the workspace this %s may reach (at most %d). Reach only: nothing is "+
+		Description: fmt.Sprintf("A database or object storage of the workspace this %s may reach (at most %d). Reach only: nothing is "+
 			"put into the %s (no variables) and nothing restarts; connect with the database's own address and login. "+
 			"A database is reached only by what links it, and it can't be deleted while a %s links it. Through an "+
 			"API key the link needs the Network permission unless the key made both this %s and the database.",

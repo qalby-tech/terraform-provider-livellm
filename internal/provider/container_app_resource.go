@@ -234,7 +234,8 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Description: "A database of the workspace this app uses (at most 8). The block lets the app, with every " +
 					"service of its stack, reach the database inside the workspace: a database is reached only by what links " +
 					"it. With env, its connection details become the app's environment variables under those names; the " +
-					"password, and the url, which holds it, are read from the database's own stored login: they are never in " +
+					"password, and the url, which holds it, are read from the database's own stored login (an object " +
+					"storage's secretKey from its stored keys): they are never in " +
 					"the app's settings, in state or in an API answer, and the app starts once the database accepts " +
 					"connections (no starts_after needed). Without env the link is reach only: no variables, no wait, and " +
 					"adding or removing the block never restarts the app (for start order use starts_after, which reaches " +
@@ -251,7 +252,9 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 							ElementType: types.StringType,
 							Description: "Environment variable name → the detail it carries: host, port, database, username, " +
 								"password or url (postgres://user:password@host:5432/app, redis://:password@host:6379). A Redis " +
-								"database gives host, port, url and password — no database or username. 0 to 12 variables; left out " +
+								"database gives host, port, url and password — no database or username. An object storage (s3) " +
+								"gives endpoint, host, port, region, bucket (app), accessKey and secretKey (read from its stored " +
+								"keys like a password) — no database, username, password or url. 0 to 12 variables; left out " +
 								"(or {}), the link is reach only. A name is used once in the app, across env, secret_env and every " +
 								"database block.",
 						},
@@ -445,8 +448,11 @@ const (
 )
 
 var (
-	envNameRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	linkFields = []string{"host", "port", "database", "username", "password", "url"}
+	envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// Every engine's details; the platform holds each engine to its own
+	// (the plan knows a link's database by name only).
+	linkFields = []string{"host", "port", "database", "username", "password", "url",
+		"endpoint", "region", "bucket", "accessKey", "secretKey"}
 )
 
 // databaseErrors checks the database blocks as written: at most 8, each

@@ -254,3 +254,174 @@ func TestStorageUsernameReadBack(t *testing.T) {
 		t.Errorf("no login read back as %q", got)
 	}
 }
+
+// Object storage (engine s3) has no backups: nothing about them is sent, on
+// create or on update, so an off block never reaches the platform.
+func TestStorageBackupBodyObjectStorage(t *testing.T) {
+	ctx := context.Background()
+	for _, update := range []bool{false, true} {
+		if got, ok := storageSpec(ctx, baseStorage("s3"), "", update)["backup"]; ok {
+			t.Errorf("object storage (update %v) sent backup %v", update, got)
+		}
+	}
+	// Even a block the plan refuses is never sent.
+	m := baseStorage("s3")
+	m.Backup = &storageBackupModel{Mode: types.StringNull(), KeepDays: types.Int64Null()}
+	if got, ok := storageSpec(ctx, m, "", true)["backup"]; ok {
+		t.Errorf("object storage sent backup %v", got)
+	}
+}
+
+func TestStorageConfigErrorsObjectStorage(t *testing.T) {
+	plain := baseStorage("s3")
+	plain.Version = types.StringValue("1")
+	plain.Instances = types.Int64Value(1)
+	plain.PasswordWO = types.StringValue("a-long-secret-key")
+	if got := storageConfigErrors(plain); len(got) != 0 {
+		t.Errorf("object storage version 1, one instance: %v", got)
+	}
+	if got := storageConfigErrors(baseStorage("s3")); len(got) != 0 {
+		t.Errorf("object storage with everything left out: %v", got)
+	}
+	cases := []struct {
+		name string
+		edit func(*storageModel)
+		want string
+	}{
+		{"a backup block", func(m *storageModel) {
+			m.Backup = &storageBackupModel{Mode: types.StringNull(), KeepDays: types.Int64Null()}
+		}, "Object storage has no backups yet"},
+		{"three instances", func(m *storageModel) { m.Instances = types.Int64Value(3) }, "Object storage runs as one server"},
+		{"another version", func(m *storageModel) { m.Version = types.StringValue("2") }, "Object storage runs version 1"},
+		{"a secret key ending with a space", func(m *storageModel) { m.PasswordWO = types.StringValue("secret-key ") },
+			"The secret key can't start or end with a space"},
+	}
+	for _, c := range cases {
+		m := baseStorage("s3")
+		c.edit(&m)
+		got := storageConfigErrors(m)
+		if len(got) != 1 || got[0][0] != c.want {
+			t.Errorf("%s: %v, want %q", c.name, got, c.want)
+		}
+	}
+	// Values not known yet are left for the platform.
+	m := baseStorage("s3")
+	m.Version, m.Instances, m.PasswordWO = types.StringUnknown(), types.Int64Unknown(), types.StringUnknown()
+	if got := storageConfigErrors(m); len(got) != 0 {
+		t.Errorf("unknown values: %v", got)
+	}
+	// The space rule is object storage's own.
+	pg := baseStorage("postgres")
+	pg.PasswordWO = types.StringValue(" pw ")
+	if got := storageConfigErrors(pg); len(got) != 0 {
+		t.Errorf("postgres password with spaces: %v", got)
+	}
+}
+
+// admin_console is sent whenever it is known, off included (a write replaces
+// the database's settings), and never while it isn't.
+func TestStorageAdminConsoleBody(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name string
+		v    types.Bool
+		want any
+	}{
+		{"on", types.BoolValue(true), true},
+		{"off", types.BoolValue(false), false},
+		{"not known yet", types.BoolUnknown(), nil},
+		{"null", types.BoolNull(), nil},
+	} {
+		m := baseStorage("s3")
+		m.AdminConsole = c.v
+		got, ok := storageSpec(ctx, m, "", true)["adminConsole"]
+		if c.want == nil {
+			if ok {
+				t.Errorf("%s: sent %v", c.name, got)
+			}
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s: sent %v, want %v", c.name, got, c.want)
+		}
+	}
+	if got := storageAdminConsole(map[string]any{"engine": "s3"}); !got.Equal(types.BoolValue(false)) {
+		t.Errorf("a database that says nothing about its console reads %v, want false", got)
+	}
+	if got := storageAdminConsole(map[string]any{"adminConsole": true}); !got.Equal(types.BoolValue(true)) {
+		t.Errorf("console on reads %v", got)
+	}
+}
+
+// Left out, admin_console plans as what the database has (a console switched
+// on in the dashboard stays on); a new database leaves it to the platform.
+func TestKeepAdminConsoleWhenUnset(t *testing.T) {
+	ctx := context.Background()
+	obj := tftypes.Object{AttributeTypes: map[string]tftypes.Type{}}
+	saved := tfsdk.State{Raw: tftypes.NewValue(obj, map[string]tftypes.Value{})}
+	creating := tfsdk.State{Raw: tftypes.NewValue(obj, nil)}
+	on, off := types.BoolValue(true), types.BoolValue(false)
+	for _, c := range []struct {
+		name          string
+		state         tfsdk.State
+		config, prior types.Bool
+		want          types.Bool
+	}{
+		{"left out, switched on elsewhere", saved, types.BoolNull(), on, on},
+		{"left out, off", saved, types.BoolNull(), off, off},
+		{"configured off", saved, off, on, off},
+		{"configured on", saved, on, off, on},
+		{"a new database", creating, types.BoolNull(), types.BoolNull(), types.BoolUnknown()},
+	} {
+		plan := c.config
+		if plan.IsNull() {
+			plan = types.BoolUnknown()
+		}
+		resp := &planmodifier.BoolResponse{PlanValue: plan}
+		keepSizeWhenUnset{}.PlanModifyBool(ctx, planmodifier.BoolRequest{
+			State: c.state, ConfigValue: c.config, StateValue: c.prior, PlanValue: plan,
+		}, resp)
+		if !resp.PlanValue.Equal(c.want) {
+			t.Errorf("%s: planned %v, want %v", c.name, resp.PlanValue, c.want)
+		}
+	}
+}
+
+// An update sends the configured password when its version changes, and when
+// the console is turned on (the platform needs it in the same write).
+func TestStoragePassword(t *testing.T) {
+	m := func(version int64, console types.Bool) storageModel {
+		s := baseStorage("s3")
+		s.PasswordWOVersion = types.Int64Value(version)
+		s.AdminConsole = console
+		return s
+	}
+	on, off := types.BoolValue(true), types.BoolValue(false)
+	for _, c := range []struct {
+		name        string
+		plan, state storageModel
+		want        string
+	}{
+		{"nothing changed", m(1, off), m(1, off), ""},
+		{"a new version", m(2, off), m(1, off), "pw"},
+		{"console turned on", m(1, on), m(1, off), "pw"},
+		{"console turned on from a state without it", m(1, on), m(1, types.BoolNull()), "pw"},
+		{"console already on", m(1, on), m(1, on), ""},
+		{"console turned off", m(1, off), m(1, on), ""},
+	} {
+		if got := storagePassword(c.plan, c.state, "pw"); got != c.want {
+			t.Errorf("%s: sent %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// Object storage's one version reads back as left out where the
+// configuration left it out, and as written where it was written.
+func TestObjectStorageVersionReadBack(t *testing.T) {
+	if got := readDefaulted(types.StringNull(), "1", "1"); !got.IsNull() {
+		t.Errorf("left out reads %v", got)
+	}
+	if got := readDefaulted(types.StringValue("1"), "1", "1"); got.ValueString() != "1" {
+		t.Errorf("written reads %v", got)
+	}
+}

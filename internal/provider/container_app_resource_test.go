@@ -600,6 +600,12 @@ func TestDatabaseErrors(t *testing.T) {
 	if errs := databaseErrors(reachOnly, null, null); len(errs) != 0 {
 		t.Errorf("reach-only links refused: %v", errs)
 	}
+	// An object storage's details, the AWS_* way.
+	s3 := []appDatabaseModel{db("files", "AWS_ENDPOINT_URL_S3", "endpoint", "AWS_ACCESS_KEY_ID", "accessKey",
+		"AWS_SECRET_ACCESS_KEY", "secretKey", "AWS_REGION", "region", "S3_BUCKET", "bucket", "S3_HOST", "host", "S3_PORT", "port")}
+	if errs := databaseErrors(s3, null, null); len(errs) != 0 {
+		t.Errorf("object storage links refused: %v", errs)
+	}
 	unknown := []appDatabaseModel{{Name: types.StringUnknown(), Env: types.MapUnknown(types.StringType)}}
 	if errs := databaseErrors(unknown, null, null); len(errs) != 0 {
 		t.Errorf("values not known yet are for the platform to check: %v", errs)
@@ -623,6 +629,7 @@ func TestDatabaseErrors(t *testing.T) {
 		{"more than 12 variables", []appDatabaseModel{db("db", manyVars...)}, null, null, "Too many variables"},
 		{"a name that isn't a variable", []appDatabaseModel{db("db", "1URL", "url")}, null, null, "Invalid variable name"},
 		{"a detail there isn't", []appDatabaseModel{db("db", "HOST", "hostname")}, null, null, "Unknown database detail"},
+		{"a detail written in another case", []appDatabaseModel{db("files", "KEY", "access_key")}, null, null, "Unknown database detail"},
 		{"a name env has", []appDatabaseModel{db("db", "MODE", "host")}, envMap("MODE", "x"), null, "Variable set twice"},
 		{"a name secret_env has", []appDatabaseModel{db("db", "PW", "password")}, null, envMap("PW", "x"), "Variable set twice"},
 		{"a name two databases give", []appDatabaseModel{db("db", "HOST", "host"), db("cache", "HOST", "host")}, null, null, "Variable set twice"},

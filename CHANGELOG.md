@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.15.0
+
+- **Object storage.** `livellm_storage` takes `engine = "s3"`: an S3 server
+  of the workspace's own on its own disk (`disk_gi`, which grows), with a
+  bucket `app` made with it. `username` is its access key (generated when
+  left out) and `password_wo` its secret key; a new secret key
+  (`password_wo_version`) restarts it for a few seconds. `expose` gives it an
+  HTTPS S3 address (path-style) and `allowlist` covers that address and its
+  admin console's. `endpoints` lists `s3` and, when exposed, `s3-external`.
+  It keeps one copy of your files and has no backups: a `backup` block,
+  `instances` other than `1`, a `version` other than `"1"` and a secret key
+  with a space at either end are refused at plan time, and an update says
+  nothing about backups for it.
+- **Added** `admin_console` to `livellm_storage`, for every engine: pgAdmin,
+  Redis Commander, or the RustFS console for object storage. Left out, the
+  console keeps the state it has, so an apply no longer turns off a console
+  switched on in the dashboard; a refresh and an import read it back. Turning
+  it on sends `password_wo` in the same apply, since the platform now needs
+  the password to turn a console on.
+- `livellm_container_app`'s `database` block takes an object storage's
+  details: `endpoint`, `host`, `port`, `region`, `bucket`, `accessKey` and
+  `secretKey` (read from its stored keys, never in state). The plan accepts
+  every engine's details; the apply refuses one the linked engine doesn't
+  give.
+- `livellm_vm` and `livellm_desktop_app` `database` blocks link an object
+  storage like a database (reach only).
+- Needs a platform that knows object storage for `engine = "s3"`; an older
+  one refuses it at apply.
+
 ## 0.14.0
 
 - **Added** `reachable_from` to `livellm_vm`, `livellm_container_app`,

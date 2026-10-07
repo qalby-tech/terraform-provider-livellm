@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
@@ -23,8 +24,10 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// livellm_storage — a managed database (Postgres or Redis). Create/update
-// wait until the database reports ready; the admin password is write-only.
+// livellm_storage — a managed database (Postgres or Redis) or an object
+// storage (engine s3: an S3 server of the workspace's own). Create/update wait
+// until it reports ready; the password (an object storage's secret key) is
+// write-only.
 type storageResource struct {
 	data *providerData
 }
@@ -39,10 +42,11 @@ func (r *storageResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "A managed database — Postgres or Redis — with optional backups (Postgres) and " +
-			"external TLS exposure. Credentials are write-only. Inside the workspace a database is reached only " +
-			"by what links it: an app's database block or starts_after, a machine's or Desktop App's database " +
-			"block. It has no reachable_from. Its external address (expose) has its own allowlist.",
+		Description: "A managed database — Postgres or Redis — or an object storage (engine s3: S3 buckets), with " +
+			"optional backups (Postgres), an optional admin console and an optional external address. Credentials " +
+			"are write-only. Inside the workspace it is reached only by what links it: an app's database block or " +
+			"starts_after, a machine's or Desktop App's database block. It has no reachable_from. Its external " +
+			"address (expose) has its own allowlist.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Required:    true,
@@ -52,16 +56,17 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"engine": schema.StringAttribute{
-				Required:    true,
-				Description: "postgres or redis. Changing it replaces the database.",
-				Validators:  []validator.String{stringvalidator.OneOf("postgres", "redis")},
+				Required: true,
+				Description: "postgres, redis or s3 (object storage: an S3 server with buckets, one copy, no backups). " +
+					"Changing it replaces the database.",
+				Validators: []validator.String{stringvalidator.OneOf("postgres", "redis", "s3")},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"version": schema.StringAttribute{
 				Optional:    true,
-				Description: "Engine major version (e.g. \"16\" for Postgres).",
+				Description: "Engine major version (e.g. \"16\" for Postgres). Object storage runs version \"1\".",
 			},
 			"disk_gi": schema.Int64Attribute{
 				Optional:      true,
@@ -73,7 +78,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"instances": schema.Int64Attribute{
 				Optional: true,
 				Description: "1, or 3 for Postgres: two standby copies, one of which takes over if the main one fails. " +
-					"Redis runs as one instance.",
+					"Redis and object storage run as one instance.",
 				Validators: []validator.Int64{int64validator.OneOf(1, 3)},
 			},
 			"cpu": schema.StringAttribute{
@@ -91,8 +96,9 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"username": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "Application username (Postgres). Set once at create; left out, the platform names it " +
-					"`app`. Leaving it out later keeps the name the database has.",
+				Description: "Application username (Postgres), or an object storage's access key. Set once at create; " +
+					"left out, the platform names it `app` (an object storage gets a generated access key). Leaving it " +
+					"out later keeps the name the database has.",
 				// Left out, the name the database has is planned, so it is
 				// never replaced for a name no one asked to change (the
 				// platform's own `app`, or the one an import read).
@@ -102,28 +108,43 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"password_wo": schema.StringAttribute{
-				Required:    true,
-				WriteOnly:   true,
-				Sensitive:   true,
-				Description: "The database password (write-only: never stored in state, never readable back). Re-sent when password_wo_version changes.",
+				Required:  true,
+				WriteOnly: true,
+				Sensitive: true,
+				Description: "The database password, or an object storage's secret key (write-only: never stored in " +
+					"state, never readable back). Re-sent when password_wo_version changes (a new secret key restarts the " +
+					"object storage) and when admin_console is turned on.",
 			},
 			"password_wo_version": schema.Int64Attribute{
 				Required:    true,
 				Description: "Rotation trigger for password_wo.",
 			},
 			"expose": schema.BoolAttribute{
-				Optional:    true,
-				Description: "Expose the database externally (TLS, SNI-routed).",
+				Optional: true,
+				Description: "Expose the database externally (TLS, SNI-routed). An object storage gets an HTTPS S3 " +
+					"address, path-style.",
 			},
 			"allowlist": schema.ListAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Client source CIDRs/IPs allowed when exposed. Empty = no IP restriction.",
+				Description: "Client source CIDRs/IPs allowed when exposed. Empty = no IP restriction. For an object " +
+					"storage it covers both its S3 address and its admin console's.",
+			},
+			"admin_console": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "The admin console on its own HTTPS address: pgAdmin for Postgres, Redis Commander for " +
+					"Redis, the RustFS console for object storage (it signs in with the access key and secret key, and " +
+					"its address also answers S3 requests signed with them). Left out, the console keeps the state it " +
+					"has, also one switched on in the dashboard. Turning it on sends password_wo in the same apply, " +
+					"since the platform needs it; for object storage that restarts it for a few seconds.",
+				PlanModifiers: []planmodifier.Bool{keepSizeWhenUnset{}},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the database is up."},
 			"endpoints": schema.ListNestedAttribute{
-				Computed:    true,
-				Description: "Connection endpoints as reported by the platform (in-cluster and, when exposed, external).",
+				Computed: true,
+				Description: "Connection endpoints as reported by the platform (in-cluster and, when exposed, external; " +
+					"an object storage's are s3 and s3-external).",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{Computed: true},
@@ -138,7 +159,8 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
 			"backup": schema.SingleNestedBlock{
-				Description: "Backups (Postgres only). With the block, backups are on; without it, off. " +
+				Description: "Backups (Postgres only; object storage keeps one copy and has none). With the block, " +
+					"backups are on; without it, off. " +
 					"A backup restores into a new database; the one it came from keeps running.",
 				Attributes: map[string]schema.Attribute{
 					"mode": schema.StringAttribute{
@@ -186,6 +208,7 @@ type storageModel struct {
 	PasswordWOVersion types.Int64         `tfsdk:"password_wo_version"`
 	Expose            types.Bool          `tfsdk:"expose"`
 	Allowlist         types.List          `tfsdk:"allowlist"`
+	AdminConsole      types.Bool          `tfsdk:"admin_console"`
 	Backup            *storageBackupModel `tfsdk:"backup"`
 	Ready             types.Bool          `tfsdk:"ready"`
 	Endpoints         types.List          `tfsdk:"endpoints"`
@@ -210,9 +233,13 @@ const (
 // storageBackup is the backup the database is written with. The platform
 // keeps backups only with enabled: true, so the block says so. On an update
 // with no backup configured it says they are off, since the platform keeps
-// an explicit off and the write replaces the database's settings. Redis has
-// no backups, so nothing is said about them.
+// an explicit off and the write replaces the database's settings. Redis and
+// object storage have no backups, so nothing is said about them.
 func storageBackup(m storageModel, update bool) map[string]any {
+	switch m.Engine.ValueString() {
+	case "redis", "s3":
+		return nil
+	}
 	switch {
 	case m.Backup != nil:
 		// Both are always sent: a saved database keeps what the block leaves
@@ -272,6 +299,11 @@ func storageSpec(ctx context.Context, m storageModel, password string, update bo
 	if len(network) > 0 {
 		spec["network"] = network
 	}
+	// Sent whenever it is known, off included: a write replaces the
+	// database's settings, so one left out would turn a console off.
+	if !m.AdminConsole.IsNull() && !m.AdminConsole.IsUnknown() {
+		spec["adminConsole"] = m.AdminConsole.ValueBool()
+	}
 	if b := storageBackup(m, update); b != nil {
 		spec["backup"] = b
 	}
@@ -330,6 +362,13 @@ func (keepSizeWhenUnset) PlanModifyInt64(_ context.Context, req planmodifier.Int
 	resp.PlanValue = req.StateValue
 }
 
+func (keepSizeWhenUnset) PlanModifyBool(_ context.Context, req planmodifier.BoolRequest, resp *planmodifier.BoolResponse) {
+	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
+		return
+	}
+	resp.PlanValue = req.StateValue
+}
+
 func (keepSizeWhenUnset) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
 	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
 		return
@@ -343,6 +382,27 @@ func storageUsername(sp map[string]any) string {
 	creds, _ := sp["credentials"].(map[string]any)
 	v, _ := creds["username"].(string)
 	return v
+}
+
+// storageAdminConsole is whether the platform runs the admin console (false
+// when it says nothing).
+func storageAdminConsole(sp map[string]any) types.Bool {
+	on, _ := sp["adminConsole"].(bool)
+	return types.BoolValue(on)
+}
+
+// storagePassword is the password an update sends: the configured one when
+// password_wo_version changed, or when the admin console is being turned on
+// (the platform needs the password in the same write: the console signs in
+// with it); nothing otherwise.
+func storagePassword(plan, state storageModel, configured string) string {
+	if !plan.PasswordWOVersion.Equal(state.PasswordWOVersion) {
+		return configured
+	}
+	if plan.AdminConsole.ValueBool() && !state.AdminConsole.ValueBool() {
+		return configured
+	}
+	return ""
 }
 
 // readStorageSizes fills the sizes the platform decided when the
@@ -371,6 +431,10 @@ func fillStorageComputed(ctx context.Context, c *client.Client, m *storageModel,
 	if err == nil {
 		if w := findWorkload(ws, m.Name.ValueString()); w != nil && w.Storage != nil {
 			readStorageSizes(m, w.Storage)
+			// A console left out on create is what the platform made.
+			if m.AdminConsole.IsUnknown() {
+				m.AdminConsole = storageAdminConsole(w.Storage)
+			}
 			// A new database left without a username gets the platform's;
 			// a planned one (known) must come back as planned.
 			if v := storageUsername(w.Storage); m.Username.IsUnknown() && v != "" {
@@ -380,6 +444,9 @@ func fillStorageComputed(ctx context.Context, c *client.Client, m *storageModel,
 	}
 	if m.Username.IsUnknown() {
 		m.Username = types.StringNull()
+	}
+	if m.AdminConsole.IsUnknown() {
+		m.AdminConsole = types.BoolValue(false)
 	}
 	if m.DiskGi.IsUnknown() {
 		m.DiskGi = types.Int64Null()
@@ -409,7 +476,25 @@ func storageConfigErrors(m storageModel) [][2]string {
 	if m.Engine.IsUnknown() || m.Engine.IsNull() {
 		return errs
 	}
-	if m.Engine.ValueString() == "redis" {
+	switch m.Engine.ValueString() {
+	case "s3":
+		if m.Backup != nil {
+			errs = append(errs, [2]string{"Object storage has no backups yet",
+				"It keeps one copy of your files. Remove the backup settings."})
+		}
+		if !m.Instances.IsUnknown() && m.Instances.ValueInt64() > 1 {
+			errs = append(errs, [2]string{"Object storage runs as one server",
+				"A second copy isn't offered yet. Set instances = 1 or leave it out."})
+		}
+		if v := m.Version; !v.IsUnknown() && !v.IsNull() && v.ValueString() != "1" {
+			errs = append(errs, [2]string{"Object storage runs version 1",
+				fmt.Sprintf("Version %q isn't offered. Set version = \"1\" or leave it out.", v.ValueString())})
+		}
+		if p := m.PasswordWO; !p.IsUnknown() && !p.IsNull() && p.ValueString() != strings.TrimSpace(p.ValueString()) {
+			errs = append(errs, [2]string{"The secret key can't start or end with a space",
+				"Object storage drops the spaces around its keys, so the server and its apps would disagree. Remove them."})
+		}
+	case "redis":
 		if m.Backup != nil {
 			errs = append(errs, [2]string{"Backups are for Postgres only",
 				"Redis keeps its keys on disk across restarts, but has no backups. Remove the backup settings."})
@@ -495,7 +580,13 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 		state.Engine = types.StringValue(v)
 	}
 	if v, ok := sp["version"].(string); ok && v != "" {
-		state.Version = types.StringValue(v)
+		if state.Engine.ValueString() == "s3" {
+			// Object storage's one version reads back as left out where the
+			// configuration left it out.
+			state.Version = readDefaulted(state.Version, v, "1")
+		} else {
+			state.Version = types.StringValue(v)
+		}
 	}
 	readStorageSizes(&state, sp)
 	if v, ok := sp["instances"].(float64); ok && v > 0 {
@@ -519,6 +610,7 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 		}
 	}
 	readStorageBackup(&state, sp["backup"])
+	state.AdminConsole = storageAdminConsole(sp)
 	refreshPlacement(sp, &state.PlacementStrategy, &state.PlacementHost, &state.PlacementRegion)
 	refreshStorageStatus(ctx, r.data.Client, &state, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
@@ -532,10 +624,7 @@ func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	password := ""
-	if !plan.PasswordWOVersion.Equal(state.PasswordWOVersion) {
-		password = cfg.PasswordWO.ValueString()
-	}
+	password := storagePassword(plan, state, cfg.PasswordWO.ValueString())
 	w := client.Workload{
 		ID:      plan.Name.ValueString(),
 		Type:    "storage",
