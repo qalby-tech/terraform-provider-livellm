@@ -11,14 +11,19 @@
   admin console's. `endpoints` lists `s3` and, when exposed, `s3-external`.
   It keeps one copy of your files and has no backups: a `backup` block,
   `instances` other than `1`, a `version` other than `"1"` and a secret key
-  with a space at either end are refused at plan time, and an update says
-  nothing about backups for it.
+  with a space, tab or line break at either end are refused at plan time, and
+  an update says nothing about backups for it. An import reads its version
+  back, so a configuration with `version = "1"` plans clean after it. A plan
+  that removes its allowlist while its console stays on warns: the console's
+  address also answers S3 requests.
 - **Added** `admin_console` to `livellm_storage`, for every engine: pgAdmin,
   Redis Commander, or the RustFS console for object storage. Left out, the
   console keeps the state it has, so an apply no longer turns off a console
   switched on in the dashboard; a refresh and an import read it back. Turning
   it on sends `password_wo` in the same apply, since the platform now needs
-  the password to turn a console on.
+  the password to turn a console on. pgAdmin and Redis Commander answer from
+  any network (signed in with `admin` and the database password); `allowlist`
+  doesn't cover them.
 - `livellm_container_app`'s `database` block takes an object storage's
   details: `endpoint`, `host`, `port`, `region`, `bucket`, `accessKey` and
   `secretKey` (read from its stored keys, never in state). The plan accepts

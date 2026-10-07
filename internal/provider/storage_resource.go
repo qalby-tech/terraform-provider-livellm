@@ -127,15 +127,18 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			"allowlist": schema.ListAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
-				Description: "Client source CIDRs/IPs allowed when exposed. Empty = no IP restriction. For an object " +
-					"storage it covers both its S3 address and its admin console's.",
+				Description: "Client source CIDRs/IPs allowed when exposed. Empty = no IP restriction. It covers the " +
+					"database's exposed address only, not pgAdmin or Redis Commander; for an object storage it covers " +
+					"both its S3 address and its admin console's.",
 			},
 			"admin_console": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
 				Description: "The admin console on its own HTTPS address: pgAdmin for Postgres, Redis Commander for " +
 					"Redis, the RustFS console for object storage (it signs in with the access key and secret key, and " +
-					"its address also answers S3 requests signed with them). Left out, the console keeps the state it " +
+					"its address also answers S3 requests signed with them). pgAdmin and Redis Commander answer from any " +
+					"network and sign in with `admin` and the database password (allowlist covers only the object storage " +
+					"console). Left out, the console keeps the state it " +
 					"has, also one switched on in the dashboard. Turning it on sends password_wo in the same apply, " +
 					"since the platform needs it; for object storage that restarts it for a few seconds.",
 				PlanModifiers: []planmodifier.Bool{keepSizeWhenUnset{}},
@@ -427,19 +430,28 @@ func readStorageSizes(state *storageModel, sp map[string]any) {
 
 // fillStorageComputed reads the sizes back after a write.
 func fillStorageComputed(ctx context.Context, c *client.Client, m *storageModel, diags *diag.Diagnostics) {
-	ws, err := c.Workloads(ctx)
-	if err == nil {
-		if w := findWorkload(ws, m.Name.ValueString()); w != nil && w.Storage != nil {
-			readStorageSizes(m, w.Storage)
-			// A console left out on create is what the platform made.
-			if m.AdminConsole.IsUnknown() {
-				m.AdminConsole = storageAdminConsole(w.Storage)
-			}
-			// A new database left without a username gets the platform's;
-			// a planned one (known) must come back as planned.
-			if v := storageUsername(w.Storage); m.Username.IsUnknown() && v != "" {
-				m.Username = types.StringValue(v)
-			}
+	var sp map[string]any
+	if ws, err := c.Workloads(ctx); err == nil {
+		if w := findWorkload(ws, m.Name.ValueString()); w != nil {
+			sp = w.Storage
+		}
+	}
+	fillStorageFromSpec(m, sp)
+}
+
+// fillStorageFromSpec resolves what a write left unknown from the database's
+// settings on the platform (nil when it could not be read).
+func fillStorageFromSpec(m *storageModel, sp map[string]any) {
+	if sp != nil {
+		readStorageSizes(m, sp)
+		// A console left out on create is what the platform made.
+		if m.AdminConsole.IsUnknown() {
+			m.AdminConsole = storageAdminConsole(sp)
+		}
+		// A new database left without a username gets the platform's;
+		// a planned one (known) must come back as planned.
+		if v := storageUsername(sp); m.Username.IsUnknown() && v != "" {
+			m.Username = types.StringValue(v)
 		}
 	}
 	if m.Username.IsUnknown() {
@@ -457,6 +469,40 @@ func fillStorageComputed(ctx context.Context, c *client.Client, m *storageModel,
 	if m.Memory.IsUnknown() {
 		m.Memory = types.StringNull()
 	}
+}
+
+var _ resource.ResourceWithModifyPlan = (*storageResource)(nil)
+
+func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
+		return // create or destroy
+	}
+	var plan, state storageModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if w := consoleAllowlistWarning(plan, state); w != nil {
+		resp.Diagnostics.AddAttributeWarning(path.Root("allowlist"), w[0], w[1])
+	}
+}
+
+// consoleAllowlistWarning warns when an apply removes an object storage's
+// allowlist while its console stays on: admin_console left out keeps the
+// console, allowlist left out removes the list, and the console's address
+// answers S3 requests from then on from any network.
+func consoleAllowlistWarning(plan, state storageModel) *[2]string {
+	if plan.Engine.ValueString() != "s3" || plan.AdminConsole.IsUnknown() || !plan.AdminConsole.ValueBool() {
+		return nil
+	}
+	if !plan.Allowlist.IsNull() || state.Allowlist.IsNull() || state.Allowlist.IsUnknown() || len(state.Allowlist.Elements()) == 0 {
+		return nil
+	}
+	return &[2]string{"The object storage's allowlist will be removed",
+		"Its console stays on and this apply removes its allowlist, so the console's address (which also answers " +
+			"S3 requests) and, when exposed, its S3 address answer from any network. Set allowlist to keep the list, " +
+			"or allowlist = [] to open it on purpose."}
 }
 
 func (r *storageResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
@@ -491,8 +537,9 @@ func storageConfigErrors(m storageModel) [][2]string {
 				fmt.Sprintf("Version %q isn't offered. Set version = \"1\" or leave it out.", v.ValueString())})
 		}
 		if p := m.PasswordWO; !p.IsUnknown() && !p.IsNull() && p.ValueString() != strings.TrimSpace(p.ValueString()) {
-			errs = append(errs, [2]string{"The secret key can't start or end with a space",
-				"Object storage drops the spaces around its keys, so the server and its apps would disagree. Remove them."})
+			errs = append(errs, [2]string{"The secret key can't start or end with a space, tab or line break",
+				"Object storage drops them from around its keys, so the server and its apps would disagree. Remove them " +
+					"(a key read from a file often ends with a line break: trimspace(file(...)) drops it)."})
 		}
 	case "redis":
 		if m.Backup != nil {
@@ -575,12 +622,25 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.State.RemoveResource(ctx)
 		return
 	}
-	sp := w.Storage
+	imported := false
+	if b, d := req.Private.GetKey(ctx, importedKey); !d.HasError() && len(b) > 0 {
+		imported = true
+		resp.Diagnostics.Append(resp.Private.SetKey(ctx, importedKey, nil)...)
+	}
+	readStorage(&state, w.Storage, imported)
+	refreshStorageStatus(ctx, r.data.Client, &state, &resp.Diagnostics)
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+}
+
+// readStorage fills the state from the database's settings on the platform.
+// A first read after an import takes object storage's version as the platform
+// has it, as for any database, so a configuration that names it plans clean.
+func readStorage(state *storageModel, sp map[string]any, imported bool) {
 	if v, ok := sp["engine"].(string); ok {
 		state.Engine = types.StringValue(v)
 	}
 	if v, ok := sp["version"].(string); ok && v != "" {
-		if state.Engine.ValueString() == "s3" {
+		if state.Engine.ValueString() == "s3" && !imported {
 			// Object storage's one version reads back as left out where the
 			// configuration left it out.
 			state.Version = readDefaulted(state.Version, v, "1")
@@ -588,7 +648,7 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 			state.Version = types.StringValue(v)
 		}
 	}
-	readStorageSizes(&state, sp)
+	readStorageSizes(state, sp)
 	if v, ok := sp["instances"].(float64); ok && v > 0 {
 		state.Instances = types.Int64Value(int64(v))
 	}
@@ -609,11 +669,9 @@ func (r *storageResource) Read(ctx context.Context, req resource.ReadRequest, re
 			state.Allowlist = types.ListValueMust(types.StringType, vals)
 		}
 	}
-	readStorageBackup(&state, sp["backup"])
+	readStorageBackup(state, sp["backup"])
 	state.AdminConsole = storageAdminConsole(sp)
 	refreshPlacement(sp, &state.PlacementStrategy, &state.PlacementHost, &state.PlacementRegion)
-	refreshStorageStatus(ctx, r.data.Client, &state, &resp.Diagnostics)
-	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
 func (r *storageResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -669,4 +727,5 @@ func (r *storageResource) Delete(ctx context.Context, req resource.DeleteRequest
 func (r *storageResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), req.ID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("password_wo_version"), int64(1))...)
+	resp.Diagnostics.Append(resp.Private.SetKey(ctx, importedKey, []byte(`true`))...)
 }

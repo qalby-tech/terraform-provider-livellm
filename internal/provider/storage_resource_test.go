@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -294,7 +295,11 @@ func TestStorageConfigErrorsObjectStorage(t *testing.T) {
 		{"three instances", func(m *storageModel) { m.Instances = types.Int64Value(3) }, "Object storage runs as one server"},
 		{"another version", func(m *storageModel) { m.Version = types.StringValue("2") }, "Object storage runs version 1"},
 		{"a secret key ending with a space", func(m *storageModel) { m.PasswordWO = types.StringValue("secret-key ") },
-			"The secret key can't start or end with a space"},
+			"The secret key can't start or end with a space, tab or line break"},
+		{"a secret key ending with a line break", func(m *storageModel) { m.PasswordWO = types.StringValue("secret-key\n") },
+			"The secret key can't start or end with a space, tab or line break"},
+		{"a secret key starting with a tab", func(m *storageModel) { m.PasswordWO = types.StringValue("\tsecret-key") },
+			"The secret key can't start or end with a space, tab or line break"},
 	}
 	for _, c := range cases {
 		m := baseStorage("s3")
@@ -416,12 +421,107 @@ func TestStoragePassword(t *testing.T) {
 }
 
 // Object storage's one version reads back as left out where the
-// configuration left it out, and as written where it was written.
+// configuration left it out and as written where it was written; the first
+// read after an import takes it as the platform has it, as for Postgres.
 func TestObjectStorageVersionReadBack(t *testing.T) {
-	if got := readDefaulted(types.StringNull(), "1", "1"); !got.IsNull() {
-		t.Errorf("left out reads %v", got)
+	sp := map[string]any{"engine": "s3", "version": "1"}
+	for _, c := range []struct {
+		name     string
+		engine   string
+		prev     types.String
+		imported bool
+		version  string
+		want     types.String
+	}{
+		{"s3 left out", "s3", types.StringNull(), false, "1", types.StringNull()},
+		{"s3 written", "s3", types.StringValue("1"), false, "1", types.StringValue("1")},
+		{"s3 imported", "s3", types.StringNull(), true, "1", types.StringValue("1")},
+		{"postgres left out", "postgres", types.StringNull(), false, "16", types.StringValue("16")},
+		{"postgres imported", "postgres", types.StringNull(), true, "16", types.StringValue("16")},
+	} {
+		st := baseStorage(c.engine)
+		st.Version = c.prev
+		sp["engine"], sp["version"] = c.engine, c.version
+		readStorage(&st, sp, c.imported)
+		if !st.Version.Equal(c.want) {
+			t.Errorf("%s: version %v, want %v", c.name, st.Version, c.want)
+		}
 	}
-	if got := readDefaulted(types.StringValue("1"), "1", "1"); got.ValueString() != "1" {
-		t.Errorf("written reads %v", got)
+}
+
+// A refresh and an import read the console back from the platform, off when
+// it says nothing.
+func TestReadStorageAdminConsole(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sp   map[string]any
+		want bool
+	}{
+		{"on", map[string]any{"engine": "s3", "adminConsole": true}, true},
+		{"off", map[string]any{"engine": "postgres", "adminConsole": false}, false},
+		{"not said", map[string]any{"engine": "redis"}, false},
+	} {
+		st := baseStorage("postgres")
+		st.AdminConsole = types.BoolValue(!c.want)
+		readStorage(&st, c.sp, false)
+		if !st.AdminConsole.Equal(types.BoolValue(c.want)) {
+			t.Errorf("%s: admin_console %v, want %v", c.name, st.AdminConsole, c.want)
+		}
+	}
+}
+
+// After a write, an admin_console left unknown is what the platform made
+// (off when it can't be read); a planned one stays as planned.
+func TestFillStorageAdminConsole(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		planned types.Bool
+		sp      map[string]any
+		want    types.Bool
+	}{
+		{"unknown, platform on", types.BoolUnknown(), map[string]any{"adminConsole": true}, types.BoolValue(true)},
+		{"unknown, platform says nothing", types.BoolUnknown(), map[string]any{}, types.BoolValue(false)},
+		{"unknown, not read", types.BoolUnknown(), nil, types.BoolValue(false)},
+		{"planned off, platform on", types.BoolValue(false), map[string]any{"adminConsole": true}, types.BoolValue(false)},
+		{"planned on", types.BoolValue(true), map[string]any{}, types.BoolValue(true)},
+	} {
+		m := baseStorage("s3")
+		m.AdminConsole = c.planned
+		fillStorageFromSpec(&m, c.sp)
+		if !m.AdminConsole.Equal(c.want) {
+			t.Errorf("%s: admin_console %v, want %v", c.name, m.AdminConsole, c.want)
+		}
+	}
+}
+
+// Removing an object storage's allowlist while its console stays on warns;
+// nothing else does.
+func TestConsoleAllowlistWarning(t *testing.T) {
+	list := types.ListValueMust(types.StringType, []attr.Value{types.StringValue("203.0.113.0/24")})
+	empty := types.ListValueMust(types.StringType, []attr.Value{})
+	null := types.ListNull(types.StringType)
+	for _, c := range []struct {
+		name      string
+		engine    string
+		console   types.Bool
+		planned   types.List
+		state     types.List
+		wantWarns bool
+	}{
+		{"s3 console on, list removed", "s3", types.BoolValue(true), null, list, true},
+		{"s3 console on, list kept", "s3", types.BoolValue(true), list, list, false},
+		{"s3 console on, opened on purpose", "s3", types.BoolValue(true), empty, list, false},
+		{"s3 console on, no list before", "s3", types.BoolValue(true), null, null, false},
+		{"s3 console on, empty list before", "s3", types.BoolValue(true), null, empty, false},
+		{"s3 console off, list removed", "s3", types.BoolValue(false), null, list, false},
+		{"s3 console unknown, list removed", "s3", types.BoolUnknown(), null, list, false},
+		{"postgres console on, list removed", "postgres", types.BoolValue(true), null, list, false},
+	} {
+		plan, state := baseStorage(c.engine), baseStorage(c.engine)
+		plan.AdminConsole, plan.Allowlist = c.console, c.planned
+		state.AdminConsole, state.Allowlist = types.BoolValue(true), c.state
+		if got := consoleAllowlistWarning(plan, state); (got != nil) != c.wantWarns {
+			t.Errorf("%s: warning %v, want one: %v", c.name, got, c.wantWarns)
+		}
 	}
 }

@@ -107,9 +107,8 @@ func TestDatabaseHasNoReach(t *testing.T) {
 	if _, ok := sr.Schema.Attributes["reachable_from"]; ok {
 		t.Fatal("livellm_storage has reachable_from")
 	}
-	if _, ok := NewStorageResource().(resource.ResourceWithModifyPlan); ok {
-		t.Error("livellm_storage has a ModifyPlan (it only warned about reachable_from)")
-	}
+	// Its ModifyPlan only warns about an object storage's allowlist
+	// (TestConsoleAllowlistWarning), never about reach.
 	for _, w := range []string{"reached only by what links it", "no reachable_from"} {
 		if !strings.Contains(sr.Schema.Description, w) {
 			t.Errorf("livellm_storage description lacks %q", w)

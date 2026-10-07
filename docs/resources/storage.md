@@ -89,7 +89,8 @@ resource "livellm_storage" "cache" {
 (`disk_gi`, which can grow). It starts with one bucket, `app`; make more in its
 admin console or with any S3 tool. `username` is its access key (left out, one
 is generated) and `password_wo` its secret key, 8 to 128 characters with no
-space at either end. Apps link it with a `database` block like any database
+space, tab or line break at either end (wrap a key read from a file in
+`trimspace()`). Apps link it with a `database` block like any database
 and get its endpoint, keys, region and bucket as variables (see
 [`livellm_container_app`](container_app.md)); clients must use path-style
 addressing. The region is `us-east-1`.
@@ -118,7 +119,9 @@ resource "livellm_storage" "files" {
 - **The admin console** is at
   `https://<name>-admin-<workspace>.cloud.live-llm.com/rustfs/console/` and
   signs in with the access key and secret key. Its address also answers S3
-  requests signed with the keys. `allowlist` limits both addresses.
+  requests signed with the keys. `allowlist` limits both addresses. An apply
+  that removes the allowlist while the console stays on warns at plan time;
+  `allowlist = []` opens them on purpose.
 - `endpoints` lists `s3` (inside the workspace, `http://…:9000`) and, with
   `expose`, `s3-external`.
 
@@ -129,7 +132,9 @@ Redis Commander for Redis, the RustFS console for object storage. Left out,
 the console keeps the state it has, also one switched on in the dashboard.
 Turning it on sends `password_wo` in the same apply (the platform needs it,
 since the console signs in with it), so keep `password_wo` set to the current
-password.
+password. pgAdmin and Redis Commander answer from any network and sign in
+with `admin` and the database password: `allowlist` covers only the database's
+exposed address. For object storage it covers the console too.
 
 ### Placement
 
@@ -166,8 +171,8 @@ resource "livellm_storage" "eu_db" {
 - `memory` (String) Memory, e.g. `1Gi`; `1Gi` when unset.
 - `username` (String) Application username (Postgres), or an object storage's access key. Left out, the platform names it `app` (an object storage gets a generated access key), and leaving it out later keeps the name the database has. Changing it replaces the database.
 - `expose` (Boolean) Expose the database externally over TLS. An object storage gets an HTTPS S3 address, path-style.
-- `allowlist` (List of String) Client CIDRs/IPs allowed when exposed. Empty = no IP restriction. For an object storage it covers its S3 address and its admin console's.
-- `admin_console` (Boolean) The admin console (pgAdmin, Redis Commander, or the RustFS console for object storage). Left out, it keeps the state the database has. Turning it on sends `password_wo` in the same apply; for object storage that restarts it for a few seconds.
+- `allowlist` (List of String) Client CIDRs/IPs allowed when exposed. Empty = no IP restriction. It covers the database's exposed address only, not pgAdmin or Redis Commander; for an object storage it covers its S3 address and its admin console's.
+- `admin_console` (Boolean) The admin console (pgAdmin, Redis Commander, or the RustFS console for object storage). pgAdmin and Redis Commander answer from any network and sign in with `admin` and the database password. Left out, it keeps the state the database has. Turning it on sends `password_wo` in the same apply; for object storage that restarts it for a few seconds.
 - `backup` (Block) Backups, Postgres only (object storage keeps one copy and has none). With the block backups are on; without it they are off (a plan shows backups turned on or off elsewhere as a change).
   - `mode` (String) `daily` (the default): a full copy each night. `continuous`: the nightly copy plus every change in between, restorable to any minute inside `keep_days`. `manual`: nothing scheduled; backups taken by hand are kept.
   - `keep_days` (Number) How many days backups are kept, `1`..`365`; `10` when unset.
@@ -185,3 +190,7 @@ resource "livellm_storage" "eu_db" {
 ```shell
 terraform import livellm_storage.db app-db
 ```
+
+An import reads every setting the platform holds, an object storage's
+`version = "1"` included: a configuration that leaves `version` out plans one
+update that changes nothing on the platform, then plans clean.
