@@ -18,18 +18,26 @@ import (
 
 // apiDiag turns a client error into an actionable diagnostic. Three cases have
 // dedicated wording: 402, the workspace plan's resource pool is exhausted (the
-// fix is a plan change, not a config change); a 403 for letting one resource
-// reach another without the Network permission; and a 403 that names proxies,
-// which only a platform from before the proxies permission was dropped sends:
-// it is shown in the platform's words and says where it comes from.
+// fix is a plan change, not a config change; on an organization's workspace it
+// is the workspace's share of the organization's plan, which an owner of the
+// organization raises); a 403 for letting one resource reach another without
+// the Network permission; and a 403 that names proxies, which only a platform
+// from before the proxies permission was dropped sends: it is shown in the
+// platform's words and says where it comes from.
 func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
 	if errors.As(err, &apiErr) && apiErr.Status == 402 {
+		advice := "The workspace's plan does not have enough free CPU/RAM/disk for this. " +
+			"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, " +
+			"or free resources first."
+		if apiErr.Code() == "organization_share" {
+			advice = "This workspace belongs to an organization and is using its share. " +
+				"An owner of the organization can give it more under Organization → Billing " +
+				"(https://cloud.live-llm.com/organization/billing), or free resources first."
+		}
 		diags.AddError(
 			"Workspace plan pool exceeded",
-			fmt.Sprintf("%s: %s\n\nThe workspace's plan does not have enough free CPU/RAM/disk for this. "+
-				"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, "+
-				"or free resources first.", summary, apiErr.Body),
+			fmt.Sprintf("%s: %s\n\n%s", summary, apiErr.Body, advice),
 		)
 		return
 	}

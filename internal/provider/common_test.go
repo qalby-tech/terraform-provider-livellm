@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
@@ -79,5 +81,29 @@ func TestWaitReadySaysWhyItSawNoStatus(t *testing.T) {
 	defer cancel2()
 	if err := waitReady(short2, client.New(srv.URL, "llc_test"), "win", false); err == nil || !strings.Contains(err.Error(), "not in the workspace's status") {
 		t.Errorf("missing: %v", err)
+	}
+}
+
+// A 402 on a workspace of the person's own says to raise the workspace's
+// plan; one that carries organization_share says the workspace is using its
+// share of an organization, which an owner raises under Organization →
+// Billing. Both keep the platform's answer in the detail.
+func TestPoolRefusalWording(t *testing.T) {
+	own := `{"error":"subscription \"starter\" pool exceeded: CPU (3/2 cores) — upgrade or enable metered overage"}`
+	org := `{"error":"This workspace is using its share of Acme. An owner can give it more under Organization → Billing.","code":"organization_share"}`
+	for _, c := range []struct{ body, want string }{
+		{own, "Cannot create VM: " + own + "\n\nThe workspace's plan does not have enough free CPU/RAM/disk for this. " +
+			"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, or free resources first."},
+		{org, "Cannot create VM: " + org + "\n\nThis workspace belongs to an organization and is using its share. " +
+			"An owner of the organization can give it more under Organization → Billing " +
+			"(https://cloud.live-llm.com/organization/billing), or free resources first."},
+		{"pool exceeded", "Cannot create VM: pool exceeded\n\nThe workspace's plan does not have enough free CPU/RAM/disk for this. " +
+			"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, or free resources first."},
+	} {
+		var diags diag.Diagnostics
+		apiDiag(&diags, "Cannot create VM", &client.APIError{Status: 402, Body: c.body})
+		if len(diags) != 1 || diags[0].Summary() != "Workspace plan pool exceeded" || diags[0].Detail() != c.want {
+			t.Errorf("402 %s:\n got %v\nwant %q", c.body, diags, c.want)
+		}
 	}
 }

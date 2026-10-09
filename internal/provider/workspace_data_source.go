@@ -29,7 +29,7 @@ func (d *workspaceDataSource) Schema(_ context.Context, _ datasource.SchemaReque
 		Attributes: map[string]schema.Attribute{
 			"name":  schema.StringAttribute{Computed: true, Description: "Workspace (tenant) name."},
 			"plan":  schema.StringAttribute{Computed: true, Description: "Plan the workspace runs on."},
-			"owner": schema.StringAttribute{Computed: true, Description: "Owning user id."},
+			"owner": schema.StringAttribute{Computed: true, Description: "Id of the person who created the workspace."},
 		},
 	}
 }

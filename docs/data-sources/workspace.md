@@ -33,4 +33,4 @@ real URLs, so there is never a reason to assemble hostnames by hand.
 
 - `name` (String) Workspace (tenant) name.
 - `plan` (String) Plan the workspace runs on.
-- `owner` (String) Owning user id.
+- `owner` (String) Id of the person who created the workspace.

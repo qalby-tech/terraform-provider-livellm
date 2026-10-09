@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Organizations.** A create or an update refused because an organization's
+  workspace has used its share of the organization's plan now says so: an
+  owner of the organization can give it more under Organization → Billing,
+  or free resources first. On a workspace of your own the error still says to
+  raise the plan.
+- `livellm_workspace`'s `owner` is described as the id of the person who
+  created the workspace. The value is unchanged; on an organization's
+  workspace it names who made it, not everyone who owns it.
+
 ## 0.15.0
 
 - **Object storage.** `livellm_storage` takes `engine = "s3"`: an S3 server
