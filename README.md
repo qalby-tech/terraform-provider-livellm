@@ -81,8 +81,9 @@ between resources the key made itself or when the one reached already lets
 the whole workspace in ([docs](docs/index.md#inside-the-workspace)).
 
 Creates and updates wait until the resource is actually serving, and plan-pool
-exhaustion surfaces as a clear "raise your plan" diagnostic rather than a raw
-HTTP error. Create/update timeouts are configurable per resource via the standard `timeouts` block.
+exhaustion surfaces as a clear diagnostic rather than a raw HTTP error: raise
+the plan, or on an organization's workspace ask an owner of the organization to
+give it more under Organization → Billing. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
