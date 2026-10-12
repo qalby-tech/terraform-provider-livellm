@@ -16,19 +16,28 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// apiDiag turns a client error into an actionable diagnostic. Three cases have
-// dedicated wording: 402, the workspace plan's resource pool is exhausted (the
-// fix is a plan change, not a config change; on an organization's workspace it
-// is the workspace's share of the organization's plan, which an owner of the
-// organization raises); a 403 for letting one resource reach another without
-// the Network permission; and a 403 that names proxies, which only a platform
-// from before the proxies permission was dropped sends: it is shown in the
-// platform's words and says where it comes from.
+// apiDiag turns a client error into an actionable diagnostic. These cases
+// have dedicated wording: a billing refusal the API names by its code
+// (billingRefusals: pay as you go off, past its limit, a card missing, a
+// payment overdue, pay as you go not open to the account); any other 402, the
+// workspace plan's resource pool is exhausted (the fix is a plan change, not a
+// config change; on an organization's workspace it is the workspace's share
+// of the organization's plan, which an owner of the organization raises); a
+// 403 for letting one resource reach another without the Network permission;
+// and a 403 that names proxies, which only a platform from before the proxies
+// permission was dropped sends: it is shown in the platform's words and says
+// where it comes from.
 func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && (apiErr.Status == 402 || apiErr.Status == 403) {
+		if b, ok := billingRefusals[apiErr.Code()]; ok {
+			diags.AddError(b.summary, fmt.Sprintf("%s: %s\n\n%s", summary, apiErr.Message(), b.next))
+			return
+		}
+	}
 	if errors.As(err, &apiErr) && apiErr.Status == 402 {
 		advice := "The workspace's plan does not have enough free CPU/RAM/disk for this. " +
-			"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, " +
+			"Raise the plan (or turn on pay as you go) at https://cloud.live-llm.com/billing, " +
 			"or free resources first."
 		if apiErr.Code() == "organization_share" {
 			advice = "This workspace belongs to an organization and is using its share. " +
@@ -66,6 +75,32 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 		return
 	}
 	diags.AddError(summary, err.Error())
+}
+
+// billingRefusals are the billing refusals a create or an update can get,
+// by the API's code (402, or 403 for payg_not_offered): what the diagnostic
+// is called and what to do next. The code decides, whatever the words; the
+// platform's own words come first in the detail. An API key can't add a card,
+// pay an invoice or raise the pay-as-you-go limit, so those name a person on
+// the console's Billing page. A payment's own link is never printed: it is a
+// link that pays, and Terraform's output often lands in shared logs.
+var billingRefusals = map[string]struct{ summary, next string }{
+	"payg_off": {"Workspace plan pool exceeded",
+		"The plan has no room for this, and pay as you go is off. A person turns on pay as you go, or chooses a " +
+			"bigger plan, on the console's Billing page (https://cloud.live-llm.com/billing), or free resources first."},
+	"payg_limit": {"Pay-as-you-go limit reached",
+		"This would take the account's pay as you go past its monthly limit. A person raises the limit on the " +
+			"console's Billing page (https://cloud.live-llm.com/billing); an API key can only lower it. Or free " +
+			"resources first."},
+	"card_required": {"A card is needed",
+		"Pay as you go and paid plans need a card on file. A person adds one on the console's Billing page " +
+			"(https://cloud.live-llm.com/billing, Add a card); an API key can't. Then apply again."},
+	"payment_overdue": {"A payment is overdue",
+		"A payment failed, so nothing can be added until it is paid; what runs keeps running. A person pays the " +
+			"open invoice on the console's Billing page (https://cloud.live-llm.com/billing), then apply again."},
+	"payg_not_offered": {"Pay as you go isn't available",
+		"Pay as you go and paid plans aren't open to this account yet; LiveLLM opens them for an account. Until " +
+			"then keep the workspace within its plan, or free resources first."},
 }
 
 // networkRefusal says whether a 403 is the platform refusing to let one

@@ -196,9 +196,13 @@ The plan warns when a replacement its own attributes ask for changes who
 reaches what; `-replace` and a tainted resource don't get that warning.
 
 Creates and updates wait until the resource is actually serving; plan-pool
-exhaustion surfaces as a clear diagnostic: raise the plan, or on an
-organization's workspace ask an owner of the organization to give it more under
-Organization → Billing. Create/update timeouts are configurable per resource via the standard `timeouts` block.
+exhaustion surfaces as a clear diagnostic: turn on pay as you go or raise the
+plan on the console's Billing page, or on an organization's workspace ask an
+owner of the organization to give it more under Organization → Billing. Pay as
+you go past its monthly limit, a card missing, a payment overdue and pay as you
+go not yet open to the account each get their own diagnostic, naming what a
+person does on the Billing page (an API key can't add a card, pay or raise the
+limit). Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`, `auth_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.

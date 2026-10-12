@@ -81,9 +81,13 @@ between resources the key made itself or when the one reached already lets
 the whole workspace in ([docs](docs/index.md#inside-the-workspace)).
 
 Creates and updates wait until the resource is actually serving, and plan-pool
-exhaustion surfaces as a clear diagnostic rather than a raw HTTP error: raise
-the plan, or on an organization's workspace ask an owner of the organization to
-give it more under Organization → Billing. Create/update timeouts are configurable per resource via the standard `timeouts` block.
+exhaustion surfaces as a clear diagnostic rather than a raw HTTP error: turn on
+pay as you go or raise the plan on the console's Billing page, or on an
+organization's workspace ask an owner of the organization to give it more under
+Organization → Billing. Pay as you go past its monthly limit, a card missing, a
+payment overdue and pay as you go not yet open to the account each get their
+own diagnostic, naming what a person does on the Billing page (an API key can't
+add a card, pay or raise the limit). Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.

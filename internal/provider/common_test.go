@@ -93,17 +93,77 @@ func TestPoolRefusalWording(t *testing.T) {
 	org := `{"error":"This workspace is using its share of Acme. An owner can give it more under Organization → Billing.","code":"organization_share"}`
 	for _, c := range []struct{ body, want string }{
 		{own, "Cannot create VM: " + own + "\n\nThe workspace's plan does not have enough free CPU/RAM/disk for this. " +
-			"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, or free resources first."},
+			"Raise the plan (or turn on pay as you go) at https://cloud.live-llm.com/billing, or free resources first."},
 		{org, "Cannot create VM: " + org + "\n\nThis workspace belongs to an organization and is using its share. " +
 			"An owner of the organization can give it more under Organization → Billing " +
 			"(https://cloud.live-llm.com/organization/billing), or free resources first."},
 		{"pool exceeded", "Cannot create VM: pool exceeded\n\nThe workspace's plan does not have enough free CPU/RAM/disk for this. " +
-			"Raise the plan (or enable metered billing) at https://cloud.live-llm.com/billing, or free resources first."},
+			"Raise the plan (or turn on pay as you go) at https://cloud.live-llm.com/billing, or free resources first."},
 	} {
 		var diags diag.Diagnostics
 		apiDiag(&diags, "Cannot create VM", &client.APIError{Status: 402, Body: c.body})
 		if len(diags) != 1 || diags[0].Summary() != "Workspace plan pool exceeded" || diags[0].Detail() != c.want {
 			t.Errorf("402 %s:\n got %v\nwant %q", c.body, diags, c.want)
 		}
+	}
+}
+
+// A billing refusal the API names by its code gets a diagnostic of its own:
+// what it is called and what to do, after the platform's words (never the raw
+// body: a payment's link stays out of the output). The code decides, so a
+// payg_off says to turn on pay as you go whatever its words, and a 403
+// payg_not_offered isn't taken for a permission. A code this provider doesn't
+// know keeps the pool advice.
+func TestBillingRefusalWording(t *testing.T) {
+	for _, c := range []struct {
+		status        int
+		body          string
+		summary, want string
+	}{
+		{402, `{"error":"Starter includes no resources. Turn on pay as you go, or choose Pro, on the Billing page.","code":"payg_off"}`,
+			"Workspace plan pool exceeded",
+			"Cannot create VM: Starter includes no resources. Turn on pay as you go, or choose Pro, on the Billing page.\n\n" +
+				"The plan has no room for this, and pay as you go is off. A person turns on pay as you go, or chooses a " +
+				"bigger plan, on the console's Billing page (https://cloud.live-llm.com/billing), or free resources first."},
+		{402, `{"error":"This would bring pay as you go to $140 a month, past your $100 limit. Raise it on the Billing page.","code":"payg_limit"}`,
+			"Pay-as-you-go limit reached",
+			"Cannot create VM: This would bring pay as you go to $140 a month, past your $100 limit. Raise it on the Billing page.\n\n" +
+				"This would take the account's pay as you go past its monthly limit. A person raises the limit on the " +
+				"console's Billing page (https://cloud.live-llm.com/billing); an API key can only lower it. Or free " +
+				"resources first."},
+		{402, `{"error":"Add a card first: Billing → Add a card.","code":"card_required","checkout":"card"}`,
+			"A card is needed",
+			"Cannot create VM: Add a card first: Billing → Add a card.\n\n" +
+				"Pay as you go and paid plans need a card on file. A person adds one on the console's Billing page " +
+				"(https://cloud.live-llm.com/billing, Add a card); an API key can't. Then apply again."},
+		{402, `{"error":"A payment failed on 3 November. Pay the open invoice to add resources.","code":"payment_overdue","payUrl":"https://invoice.example/i/secret"}`,
+			"A payment is overdue",
+			"Cannot create VM: A payment failed on 3 November. Pay the open invoice to add resources.\n\n" +
+				"A payment failed, so nothing can be added until it is paid; what runs keeps running. A person pays the " +
+				"open invoice on the console's Billing page (https://cloud.live-llm.com/billing), then apply again."},
+		{403, `{"error":"Pay as you go isn't open to new accounts yet.","code":"payg_not_offered"}`,
+			"Pay as you go isn't available",
+			"Cannot create VM: Pay as you go isn't open to new accounts yet.\n\n" +
+				"Pay as you go and paid plans aren't open to this account yet; LiveLLM opens them for an account. Until " +
+				"then keep the workspace within its plan, or free resources first."},
+		{402, `{"error":"Something new.","code":"something_new"}`,
+			"Workspace plan pool exceeded",
+			"Cannot create VM: " + `{"error":"Something new.","code":"something_new"}` + "\n\nThe workspace's plan does not have enough free CPU/RAM/disk for this. " +
+				"Raise the plan (or turn on pay as you go) at https://cloud.live-llm.com/billing, or free resources first."},
+	} {
+		var diags diag.Diagnostics
+		apiDiag(&diags, "Cannot create VM", &client.APIError{Status: c.status, Body: c.body})
+		if len(diags) != 1 || diags[0].Summary() != c.summary || diags[0].Detail() != c.want {
+			t.Errorf("%d %s:\n got %v\nwant %q: %q", c.status, c.body, diags, c.summary, c.want)
+		}
+		if strings.Contains(diags[0].Detail(), "invoice.example") {
+			t.Errorf("%s: the payment's link is in the output", c.body)
+		}
+	}
+	// any other 403 is not a billing refusal
+	var diags diag.Diagnostics
+	apiDiag(&diags, "Cannot create VM", &client.APIError{Status: 403, Body: `{"error":"Not yours.","code":"payg_off_typo"}`})
+	if len(diags) != 1 || diags[0].Summary() != "Cannot create VM" {
+		t.Errorf("a 403 without a billing code: %v", diags)
 	}
 }

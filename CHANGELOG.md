@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Pay as you go.** A create or an update refused for billing now says what
+  to do, by the platform's code: pay as you go off (`payg_off`: turn it on, or
+  choose a bigger plan, on the console's Billing page; Starter includes no
+  resources), past its monthly limit (`payg_limit`: a person raises it there;
+  an API key can only lower it), a card missing (`card_required`: a person
+  adds one there), a payment overdue (`payment_overdue`: a person pays the
+  open invoice there; what runs keeps running) and pay as you go not yet open
+  to the account (`payg_not_offered`, a 403 that is no longer read as a
+  missing permission). The diagnostic shows the platform's words, never the
+  link that pays an invoice. Any other full plan still says to raise it, now
+  "or turn on pay as you go" instead of "enable metered billing".
 - **Organizations.** A create or an update refused because an organization's
   workspace has used its share of the organization's plan now says so: an
   owner of the organization can give it more under Organization → Billing,
