@@ -4,7 +4,7 @@
 
 - **Pay as you go.** A create or an update refused for billing now says what
   to do, by the platform's code: pay as you go off (`payg_off`: turn it on, or
-  choose a bigger plan, on the console's Billing page; Starter includes no
+  choose a bigger plan, on the console's Billing page; Free includes no
   resources), past its monthly limit (`payg_limit`: a person raises it there;
   an API key can only lower it), a card missing (`card_required`: a person
   adds one there), a payment overdue (`payment_overdue`: a person pays the

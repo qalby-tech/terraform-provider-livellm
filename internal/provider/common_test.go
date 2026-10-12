@@ -120,9 +120,9 @@ func TestBillingRefusalWording(t *testing.T) {
 		body          string
 		summary, want string
 	}{
-		{402, `{"error":"Starter includes no resources. Turn on pay as you go, or choose Pro, on the Billing page.","code":"payg_off"}`,
+		{402, `{"error":"Free includes no resources. Turn on pay as you go, or choose Pro, on the Billing page.","code":"payg_off"}`,
 			"Workspace plan pool exceeded",
-			"Cannot create VM: Starter includes no resources. Turn on pay as you go, or choose Pro, on the Billing page.\n\n" +
+			"Cannot create VM: Free includes no resources. Turn on pay as you go, or choose Pro, on the Billing page.\n\n" +
 				"The plan has no room for this, and pay as you go is off. A person turns on pay as you go, or chooses a " +
 				"bigger plan, on the console's Billing page (https://cloud.live-llm.com/billing), or free resources first."},
 		{402, `{"error":"This would bring pay as you go to $140 a month, past your $100 limit. Raise it on the Billing page.","code":"payg_limit"}`,
