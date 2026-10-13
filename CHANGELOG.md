@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0
 
 - **Pay as you go.** A create or an update refused for billing now says what
   to do, by the platform's code: pay as you go off (`payg_off`: turn it on, or
