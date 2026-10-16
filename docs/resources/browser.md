@@ -166,8 +166,8 @@ is stored for it, and the plan warns about that.
 
 - `engine` (String) `chrome` (the default) or `camoufox`, see
   [Engines](#engines). Changing it replaces the browser.
-- `cpu` (String) CPU request, e.g. `1`.
-- `memory` (String) Memory request, e.g. `2Gi`.
+- `cpu` (String) CPU request, e.g. `1`. Left out, the platform's default for the engine is read back (no plan to change it); removing it later keeps the size the browser has.
+- `memory` (String) Memory request, e.g. `2Gi`. Left out, the platform's default for the engine is read back (no plan to change it); removing it later keeps the size the browser has.
 - `locale` (String) The browser's language and region, e.g. `ru-RU`, used for
   its pages, `navigator.language` and `Intl`. Use current codes (`he-IL`, not
   `iw-IL`). Removing it puts the browser back to its default.

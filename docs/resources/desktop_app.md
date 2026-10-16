@@ -68,11 +68,11 @@ resource "livellm_desktop_app" "eu_desk" {
 ### Optional
 
 - `image` (String) A desktop image. Leave it out for the platform's (`ghcr.io/qalby-tech/livellm-desktop:xfce`); your own works if it follows that image's contract.
-- `cpu` (String) CPU, e.g. `2` (the default).
-- `memory` (String) Memory, e.g. `4Gi` (the default).
+- `cpu` (String) CPU, e.g. `2`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
+- `memory` (String) Memory, e.g. `4Gi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
 - `resolution` (String) Screen size, e.g. `1280x800` (the default).
 - `keep_files` (Boolean) Give the desktop a home folder that survives restarts. By default it starts clean every time. Replaces the app when changed.
-- `storage_gi` (Number) With `keep_files`: the home folder in GiB (10 when left out). Replaces the app when changed.
+- `storage_gi` (Number) With `keep_files`: the home folder in GiB (10 when left out). The size the platform holds is read back, so leaving it out plans no change. Replaces the app when changed.
 - `stopped` (Boolean) Stop the desktop without deleting the app. The home folder is kept and only it is billed.
 - `timeouts` (Block) `create` (default 15m) / `delete` (default 10m).
 - `database` (Block List, at most 8) A database or object storage of the workspace this Desktop App may reach. Reach only: nothing is put into the desktop (no variables) and nothing restarts. A database is reached only by what links it, and it can't be deleted while a Desktop App links it. Through an API key the link needs the **Network** permission unless the key made both this Desktop App and the database. Links are read back on every refresh, and an apply warns when the platform didn't keep them.

@@ -345,41 +345,6 @@ func readStorageBackup(state *storageModel, raw any) {
 	state.Backup = next
 }
 
-// keepSizeWhenUnset plans a size the configuration leaves out as what the
-// database already has — including nothing, for a database saved before the
-// platform filled sizes in. UseStateForUnknown skips a null prior value, which
-// left such a database "(known after apply)" and updated on every plan; and
-// sending the platform's CPU or memory to it would restart it with resources
-// it never had.
-type keepSizeWhenUnset struct{}
-
-func (keepSizeWhenUnset) Description(context.Context) string {
-	return "Keeps the database's current value when the configuration leaves it out."
-}
-
-func (m keepSizeWhenUnset) MarkdownDescription(ctx context.Context) string { return m.Description(ctx) }
-
-func (keepSizeWhenUnset) PlanModifyInt64(_ context.Context, req planmodifier.Int64Request, resp *planmodifier.Int64Response) {
-	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
-		return
-	}
-	resp.PlanValue = req.StateValue
-}
-
-func (keepSizeWhenUnset) PlanModifyBool(_ context.Context, req planmodifier.BoolRequest, resp *planmodifier.BoolResponse) {
-	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
-		return
-	}
-	resp.PlanValue = req.StateValue
-}
-
-func (keepSizeWhenUnset) PlanModifyString(_ context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
-	if req.State.Raw.IsNull() || !req.ConfigValue.IsNull() {
-		return
-	}
-	resp.PlanValue = req.StateValue
-}
-
 // storageUsername is the login name the platform reports for a database
 // ("" when it has none).
 func storageUsername(sp map[string]any) string {

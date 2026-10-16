@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.17.0
+
+- **Sizes the platform chose read back.** `cpus`, `memory_gi` and `disk_gi`
+  on `livellm_vm`, `cpu` and `memory` on `livellm_browser`,
+  `livellm_browser_api` and `livellm_container_app`, and `cpu`, `memory` and
+  `storage_gi` on `livellm_desktop_app` are now optional and computed, as
+  `livellm_storage`'s sizes already were. A resource that leaves a size out
+  reads back the default the platform gave it (the platform now writes its
+  kind's default onto a new resource that names no size), so the next plan
+  shows no change; removing a size from the configuration later keeps the
+  size the resource has instead of planning it away. A refresh and an import
+  read every size the platform holds. A configured size is sent and kept as
+  written.
+- A size in GiB the platform holds in a unit that isn't whole
+  GiB (`512Mi`) no longer reads as that number of GiB: whole `Mi` and `Ti`
+  sizes are converted, anything else keeps what state had.
+- On a platform that doesn't write defaults yet, a size left out stays unset
+  as before: nothing changes for those resources.
+
 ## 0.16.0
 
 - **Pay as you go.** A create or an update refused for billing now says what

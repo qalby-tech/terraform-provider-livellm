@@ -68,12 +68,16 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 					"changed (they are write-only, so a new value alone makes no plan).",
 			},
 			"cpu": schema.StringAttribute{
-				Optional:    true,
-				Description: "CPU request, e.g. \"500m\".",
+				Optional:      true,
+				Computed:      true,
+				Description:   "CPU request, e.g. \"500m\". Left out, the platform's default is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"memory": schema.StringAttribute{
-				Optional:    true,
-				Description: "Memory request, e.g. \"1Gi\".",
+				Optional:      true,
+				Computed:      true,
+				Description:   "Memory request, e.g. \"1Gi\". Left out, the platform's default is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the Browser API is up."},
 		},
@@ -335,22 +339,9 @@ func readBrowserAPI(prev browserAPIModel, sp map[string]any) browserAPIModel {
 		}
 		m.RemoteBrowser = types.ListValueMust(objType, vals)
 	}
-	m.CPU = readOptional(prev.CPU, sp["cpu"])
-	m.Memory = readOptional(prev.Memory, sp["memory"])
+	m.CPU, m.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
 	refreshPlacement(sp, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	return m
-}
-
-// readOptional keeps an attribute the configuration left out unset when the
-// platform has nothing for it.
-func readOptional(prev types.String, raw any) types.String {
-	if s, _ := raw.(string); s != "" {
-		return types.StringValue(s)
-	}
-	if prev.IsNull() || prev.IsUnknown() {
-		return types.StringNull()
-	}
-	return types.StringValue("")
 }
 
 // nullAuth clears the write-only values before the model goes into state.
@@ -449,6 +440,11 @@ func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIMo
 	}
 	st, _ := statusOf(ctx, r.data.Client, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+	var sp map[string]any
+	if w := fetchWorkload(ctx, r.data.Client, m.Name.ValueString()); w != nil {
+		sp = w.Controller
+	}
+	m.CPU, m.Memory = settleString(m.CPU, sp["cpu"]), settleString(m.Memory, sp["memory"])
 }
 
 func (r *browserAPIResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {

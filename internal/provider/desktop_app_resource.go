@@ -58,12 +58,16 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 					"your own works if it follows that image's contract.",
 			},
 			"cpu": schema.StringAttribute{
-				Optional:    true,
-				Description: "CPU, e.g. \"2\" (the default).",
+				Optional:      true,
+				Computed:      true,
+				Description:   "CPU, e.g. \"2\". Left out, the platform's default is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"memory": schema.StringAttribute{
-				Optional:    true,
-				Description: "Memory, e.g. \"4Gi\" (the default).",
+				Optional:      true,
+				Computed:      true,
+				Description:   "Memory, e.g. \"4Gi\". Left out, the platform's default is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"resolution": schema.StringAttribute{
 				Optional:    true,
@@ -83,10 +87,13 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 			},
 			"storage_gi": schema.Int64Attribute{
 				Optional: true,
-				Description: "With keep_files: the home folder in GiB (10 when left out). Changing it " +
-					"replaces the app.",
+				Computed: true,
+				Description: "With keep_files: the home folder in GiB (10 when left out; the size the platform " +
+					"holds is read back). Changing it replaces the app.",
 				Validators: []validator.Int64{int64validator.AtLeast(1)},
 				PlanModifiers: []planmodifier.Int64{
+					// Before the replace check: a size left out plans as the one the app has.
+					keepSizeWhenUnset{},
 					int64planmodifier.RequiresReplace(),
 				},
 			},
@@ -189,19 +196,20 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 		}
 		return types.StringNull()
 	}
-	m.Image, m.CPU, m.Memory, m.Resolution = str("image"), str("cpu"), str("memory"), str("resolution")
+	m.Image, m.Resolution = str("image"), str("resolution")
+	m.CPU, m.Memory = readSize(d["cpu"]), readSize(d["memory"])
 	refreshPlacement(d, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	m.Database = readMachineDatabases(d)
 	keep, _ := d["keepFiles"].(bool)
 	m.KeepFiles = types.BoolValue(keep)
-	m.StorageGi = types.Int64Null()
-	if s, _ := d["storageSize"].(string); s != "" {
-		var gi int64
-		fmt.Sscanf(s, "%dGi", &gi)
-		if gi > 0 {
-			m.StorageGi = types.Int64Value(gi)
-		}
-	}
+	m.StorageGi = readGi(m.StorageGi, d["storageSize"])
+}
+
+// settleDesktopSizes resolves the sizes a write left unknown from the app's
+// settings on the platform (nil when they could not be read).
+func settleDesktopSizes(m *desktopAppModel, d map[string]any) {
+	m.CPU, m.Memory = settleString(m.CPU, d["cpu"]), settleString(m.Memory, d["memory"])
+	m.StorageGi = settleInt64(m.StorageGi, readGi(types.Int64Null(), d["storageSize"]))
 }
 
 // desktopBlock is a workload's Desktop App settings.
@@ -210,6 +218,15 @@ func desktopBlock(w *client.Workload) map[string]any { return w.Desktop }
 func refreshDesktopStatus(ctx context.Context, c *client.Client, m *desktopAppModel) {
 	st, _ := statusOf(ctx, c, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+}
+
+// refreshDesktopSizes reads back the sizes the platform chose after a write.
+func refreshDesktopSizes(ctx context.Context, c *client.Client, m *desktopAppModel) {
+	var d map[string]any
+	if w := fetchWorkload(ctx, c, m.Name.ValueString()); w != nil {
+		d = w.Desktop
+	}
+	settleDesktopSizes(m, d)
 }
 
 func (r *desktopAppResource) wait(ctx context.Context, m desktopAppModel) error {
@@ -254,6 +271,7 @@ func (r *desktopAppResource) Create(ctx context.Context, req resource.CreateRequ
 		resp.Diagnostics.AddError("Desktop App did not become ready", err.Error())
 	}
 	refreshDesktopStatus(ctx, r.data.Client, &plan)
+	refreshDesktopSizes(ctx, r.data.Client, &plan)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, plan.Name.ValueString(), "Desktop App", plan.Database, desktopBlock, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
@@ -303,6 +321,7 @@ func (r *desktopAppResource) Update(ctx context.Context, req resource.UpdateRequ
 		resp.Diagnostics.AddError("Desktop App did not become ready after update", err.Error())
 	}
 	refreshDesktopStatus(ctx, r.data.Client, &plan)
+	refreshDesktopSizes(ctx, r.data.Client, &plan)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, w.ID, "Desktop App", plan.Database, desktopBlock, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)

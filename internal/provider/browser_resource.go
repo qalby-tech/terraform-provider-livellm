@@ -131,12 +131,16 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"cpu": schema.StringAttribute{
-				Optional:    true,
-				Description: "CPU request, e.g. \"1\".",
+				Optional:      true,
+				Computed:      true,
+				Description:   "CPU request, e.g. \"1\". Left out, the platform's default for the engine is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"memory": schema.StringAttribute{
-				Optional:    true,
-				Description: "Memory request, e.g. \"2Gi\".",
+				Optional:      true,
+				Computed:      true,
+				Description:   "Memory request, e.g. \"2Gi\". Left out, the platform's default for the engine is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"locale": schema.StringAttribute{
 				Optional: true,
@@ -898,6 +902,7 @@ func (r *browserResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 func readBrowser(ctx context.Context, prev browserModel, sp map[string]any, all bool) browserModel {
 	m := prev
 	m.Engine = readEngine(sp["engine"])
+	m.CPU, m.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
 	if all || known(prev.Locale) {
 		m.Locale = readSetting(sp["locale"])
 	}
@@ -1085,6 +1090,8 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 			if plan.Languages.IsUnknown() {
 				m.Languages = read.Languages
 			}
+			m.CPU = settleString(plan.CPU, w.Browser["cpu"])
+			m.Memory = settleString(plan.Memory, w.Browser["memory"])
 			if b, ok := w.Browser["profilesReady"].(bool); ok {
 				fromSpec = &b
 			}
@@ -1096,6 +1103,7 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 	if m.Languages.IsUnknown() {
 		m.Languages = types.ListNull(types.StringType)
 	}
+	m.CPU, m.Memory = settleString(m.CPU, nil), settleString(m.Memory, nil)
 	m.Proxy = withoutSecrets(ctx, m.Proxy)
 	return m
 }

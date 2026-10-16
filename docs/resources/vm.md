@@ -177,9 +177,9 @@ resource "livellm_vm" "build" {
 - `os` (String) The system: `ubuntu` (24.04), `debian` (13), `fedora` (44) or `windows`. Debian and Fedora are servers only. Replaces the VM when changed. Defaults to `ubuntu`.
 - `windows_edition` (String) With `os = "windows"`: `desktop` (Windows 11 Pro, the default) or `server` (Windows Server 2025, Server Core). Replaces the VM when changed.
 - `desktop` (Boolean) An Ubuntu desktop instead of a terminal VM (not with `os = "windows"`). Replaces the VM when changed. Defaults to `false`.
-- `cpus` (Number) vCPU count.
-- `memory_gi` (Number) Memory in GiB.
-- `disk_gi` (Number) Root disk in GiB. Windows needs at least 64.
+- `cpus` (Number) vCPU count. Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
+- `memory_gi` (Number) Memory in GiB. Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
+- `disk_gi` (Number) Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out). Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
 - `ssh_keys` (List of String) SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. On Windows they open SSH, with PowerShell as its shell. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.

@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -72,12 +71,16 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Description: "Container entrypoint override.",
 			},
 			"cpu": schema.StringAttribute{
-				Optional:    true,
-				Description: "CPU request, e.g. \"500m\".",
+				Optional:      true,
+				Computed:      true,
+				Description:   "CPU request, e.g. \"500m\". Left out, the platform's default is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"memory": schema.StringAttribute{
-				Optional:    true,
-				Description: "Memory request, e.g. \"512Mi\".",
+				Optional:      true,
+				Computed:      true,
+				Description:   "Memory request, e.g. \"512Mi\". Left out, the platform's default is read back.",
+				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"stack": schema.StringAttribute{
 				Optional: true,
@@ -1024,17 +1027,6 @@ func readDatabases(was types.List, sp map[string]any) types.List {
 	return types.ListValueMust(objType, vals)
 }
 
-// sizeGi reads a volume size the platform reports ("10Gi", "1Ti") as GiB.
-func sizeGi(s string) (int64, bool) {
-	s = strings.TrimSpace(s)
-	for suffix, mul := range map[string]int64{"Gi": 1, "Ti": 1024} {
-		if n, err := strconv.ParseInt(strings.TrimSuffix(s, suffix), 10, 64); err == nil && strings.HasSuffix(s, suffix) {
-			return n * mul, true
-		}
-	}
-	return 0, false
-}
-
 // readVolumes maps the app's volumes back into state, in the platform's order.
 // A size that isn't in GiB keeps what state had, rather than reading as zero.
 func readVolumes(prev types.List, sp map[string]any) types.List {
@@ -1141,6 +1133,18 @@ func readPorts(prev types.List, sp map[string]any) types.List {
 	return types.ListValueMust(objType, vals)
 }
 
+// settleAppSizes reads back the cpu and memory the platform chose for an app
+// whose configuration leaves them out; planned ones stay as planned.
+func settleAppSizes(ctx context.Context, c *client.Client, m *containerAppModel) {
+	var sp map[string]any
+	if m.CPU.IsUnknown() || m.Memory.IsUnknown() {
+		if w := fetchWorkload(ctx, c, m.Name.ValueString()); w != nil {
+			sp = w.Pod
+		}
+	}
+	m.CPU, m.Memory = settleString(m.CPU, sp["cpu"]), settleString(m.Memory, sp["memory"])
+}
+
 func refreshAppStatus(ctx context.Context, c *client.Client, name string, m *containerAppModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, name)
@@ -1209,6 +1213,7 @@ func (r *containerAppResource) Create(ctx context.Context, req resource.CreateRe
 		resp.Diagnostics.AddError("App did not become ready", err.Error())
 	}
 	settleHostname(&plan)
+	settleAppSizes(ctx, r.data.Client, &plan)
 	refreshAppStatus(ctx, r.data.Client, plan.Name.ValueString(), &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
@@ -1265,12 +1270,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 		state.Source = nil
 	}
 	state.ImageAuth = readImageAuth(state.ImageAuth, sp["imageAuth"])
-	if v, ok := sp["cpu"].(string); ok && v != "" {
-		state.CPU = types.StringValue(v)
-	}
-	if v, ok := sp["memory"].(string); ok && v != "" {
-		state.Memory = types.StringValue(v)
-	}
+	state.CPU, state.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
 	env, _ := sp["env"].([]any)
 	state.Env = readEnvMap(state.Env, env, true)
 	secretEnv, _ := sp["secretEnv"].([]any)
@@ -1365,6 +1365,7 @@ func (r *containerAppResource) Update(ctx context.Context, req resource.UpdateRe
 		resp.Diagnostics.AddError("App did not become ready after update", err.Error())
 	}
 	settleHostname(&plan)
+	settleAppSizes(ctx, r.data.Client, &plan)
 	refreshAppStatus(ctx, r.data.Client, w.ID, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)

@@ -131,8 +131,8 @@ resource "livellm_browser_api" "eu" {
     `has_auth` going to `false` and warns.
 - `remote_auth_version` (Number) Change it to send new `auth_wo` values when
   nothing else changed: a write-only value alone makes no plan.
-- `cpu` (String) CPU request, e.g. `500m`.
-- `memory` (String) Memory request, e.g. `1Gi`.
+- `cpu` (String) CPU request, e.g. `500m`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the Browser API has.
+- `memory` (String) Memory request, e.g. `1Gi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the Browser API has.
 - `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. A replacement is a new resource: it starts from this attribute, and other resources lose its name (see [Replacing a resource](../index.md#replacing-a-resource)). Through a key, letting more in needs the **Network** permission, except between resources the key made itself or when this resource already lets the whole workspace in; setting `["*"]` always needs it (see [Inside the workspace](../index.md#inside-the-workspace)). Whatever may reach it can drive every browser it holds, with no key inside the workspace.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).

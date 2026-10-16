@@ -322,8 +322,8 @@ resource "livellm_container_app" "near" {
   - `username` (String, Required) Registry username.
   - `password` (String, Required, Sensitive) Registry password or access token. Stored write-only by the platform; sent from configuration on every apply.
 - `command` (List of String) Entrypoint override.
-- `cpu` (String) CPU request, e.g. `500m`.
-- `memory` (String) Memory request, e.g. `512Mi`.
+- `cpu` (String) CPU request, e.g. `500m`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
+- `memory` (String) Memory request, e.g. `512Mi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
 - `env` (Map of String) Plain environment variables.
 - `secret_env` (Map of String, Sensitive) Environment variables with secret
   values. The platform stores the values write-only — API responses carry the

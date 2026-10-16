@@ -89,16 +89,23 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				},
 			},
 			"cpus": schema.Int64Attribute{
-				Optional:    true,
-				Description: "vCPU count.",
+				Optional:      true,
+				Computed:      true,
+				Description:   "vCPU count. Left out, the platform's default for the kind of machine is read back.",
+				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
 			"memory_gi": schema.Int64Attribute{
-				Optional:    true,
-				Description: "Memory in GiB.",
+				Optional:      true,
+				Computed:      true,
+				Description:   "Memory in GiB. Left out, the platform's default for the kind of machine is read back.",
+				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
 			"disk_gi": schema.Int64Attribute{
-				Optional:    true,
-				Description: "Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out).",
+				Optional: true,
+				Computed: true,
+				Description: "Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out). " +
+					"Left out, the platform's default for the kind of machine is read back.",
+				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
 			"username": schema.StringAttribute{
 				Required: true,
@@ -473,13 +480,14 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	default:
 		spec["os"] = os
 	}
-	if !m.CPUs.IsNull() {
+	// A size still unknown (left out on a create) is the platform's to choose.
+	if known(m.CPUs) {
 		spec["cpus"] = m.CPUs.ValueInt64()
 	}
-	if !m.MemoryGi.IsNull() {
+	if known(m.MemoryGi) {
 		spec["memory"] = fmt.Sprintf("%dGi", m.MemoryGi.ValueInt64())
 	}
-	if !m.DiskGi.IsNull() {
+	if known(m.DiskGi) {
 		spec["storageSize"] = fmt.Sprintf("%dGi", m.DiskGi.ValueInt64())
 	}
 	keys := configuredKeys(ctx, m.SSHKeys)
@@ -583,12 +591,35 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
 		if m.SSHKeys.IsUnknown() {
 			m.SSHKeys = types.ListValueMust(types.StringType, []attr.Value{})
 		}
+		settleVMSizes(m, nil)
 		return
 	}
 	m.ExpiresAt = types.StringValue(w.ExpiresAt)
 	if m.SSHKeys.IsUnknown() {
 		m.SSHKeys = keyList(remoteKeys(w.VM))
 	}
+	settleVMSizes(m, w.VM)
+}
+
+// readVMSizes fills the machine's sizes from the platform's copy: the
+// default it chose for one the configuration leaves out, so the next write
+// sends them back unchanged.
+func readVMSizes(m *vmResourceModel, sp map[string]any) {
+	m.CPUs = readCount(sp["cpus"])
+	m.MemoryGi = readGi(m.MemoryGi, sp["memory"])
+	m.DiskGi = readGi(m.DiskGi, sp["storageSize"])
+}
+
+// settleVMSizes resolves the sizes a write left unknown from the machine's
+// settings (nil when they could not be read); planned ones stay as planned.
+func settleVMSizes(m *vmResourceModel, sp map[string]any) {
+	read := vmResourceModel{CPUs: types.Int64Null(), MemoryGi: types.Int64Null(), DiskGi: types.Int64Null()}
+	if sp != nil {
+		readVMSizes(&read, sp)
+	}
+	m.CPUs = settleInt64(m.CPUs, read.CPUs)
+	m.MemoryGi = settleInt64(m.MemoryGi, read.MemoryGi)
+	m.DiskGi = settleInt64(m.DiskGi, read.DiskGi)
 }
 
 // vmBlock is a workload's machine settings.
@@ -740,23 +771,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 			state.Username = types.StringValue(u)
 		}
 	}
-	if v, ok := sp["cpus"].(float64); ok && v > 0 {
-		state.CPUs = types.Int64Value(int64(v))
-	}
-	if v, ok := sp["memory"].(string); ok && v != "" {
-		var gi int64
-		fmt.Sscanf(v, "%dGi", &gi)
-		if gi > 0 {
-			state.MemoryGi = types.Int64Value(gi)
-		}
-	}
-	if v, ok := sp["storageSize"].(string); ok && v != "" {
-		var gi int64
-		fmt.Sscanf(v, "%dGi", &gi)
-		if gi > 0 {
-			state.DiskGi = types.Int64Value(gi)
-		}
-	}
+	readVMSizes(&state, sp)
 	if raw, ok := sp["allowCIDRs"].([]any); ok {
 		vals := make([]attr.Value, 0, len(raw))
 		for _, c := range raw {
