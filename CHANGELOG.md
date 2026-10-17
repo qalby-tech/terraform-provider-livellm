@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.18.0
+
+- **Object storage of 3 servers.** `livellm_storage` with `engine = "s3"`
+  takes `instances = 3`: 3 servers, one on each of 3 hosts, that keep reading
+  and writing when one host is lost. It needs 3 hosts the workspace can use
+  (on fewer the platform refuses the apply in plain words and nothing is
+  made), can't be pinned to one host (`placement_strategy = "host"` is refused
+  at plan time), and counts 3 times its cpu and memory and 1.5 times its
+  `disk_gi` toward the plan. `instances = 1`, or leaving it out, is one server
+  as before. Needs LiveLLM API 0.72 or newer; an older platform refuses
+  `instances = 3` on object storage.
+- **Servers are fixed when a store is made.** Changing `instances` on an
+  existing object storage, 1 to 3 or 3 to 1, is an error at plan time ("An
+  object storage's servers can't be changed"), never a replacement, which
+  would delete the files: make a new one under another name and copy the
+  files over.
+- `servers_desired` and `servers_ready` (computed) say how many servers an
+  object storage of 3 servers runs and how many are ready; null for anything
+  else.
+- `instances` is now optional and computed on every engine, as the sizes are:
+  left out it reads back what the database has (`1` when the platform holds
+  none), so a refresh fills it in once with no change on the platform, and a
+  configuration that drops `instances = 3` keeps 3 instead of planning it
+  away. Write `instances = 1` to bring a Postgres database back to one.
+
 ## 0.17.0
 
 - **Sizes the platform chose read back.** `cpus`, `memory_gi` and `disk_gi`

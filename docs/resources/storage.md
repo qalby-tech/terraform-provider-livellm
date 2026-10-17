@@ -110,9 +110,11 @@ resource "livellm_storage" "files" {
 }
 ```
 
-- **One copy, no backups.** Deleting a file, a bucket or the object storage is
-  final. A `backup` block, `instances` other than `1` and a `version` other
-  than `"1"` are refused at plan time.
+- **No backups.** Deleting a file, a bucket or the object storage is final. A
+  `backup` block and a `version` other than `"1"` are refused at plan time.
+- **1 server or 3.** Left out, `instances` is `1`: one server. `instances = 3`
+  makes 3 servers, one on each of 3 hosts, that keep reading and writing when
+  one host is lost (see below).
 - **A new secret key** (bump `password_wo_version`) restarts the object storage
   for a few seconds; linked apps read it when they restart. Keys or users made
   in the console stay: check them there.
@@ -127,6 +129,35 @@ resource "livellm_storage" "files" {
   `admin_console = false` to turn it off, or set `allowlist`.
 - `endpoints` lists `s3` (inside the workspace, `http://…:9000`) and, with
   `expose`, `s3-external`.
+
+#### 3 servers
+
+```terraform
+resource "livellm_storage" "files" {
+  name      = "files"
+  engine    = "s3"
+  instances = 3 # one server on each of 3 hosts; fixed once made
+  disk_gi   = 20
+
+  password_wo         = var.files_secret_key
+  password_wo_version = 1
+}
+```
+
+- It needs 3 hosts the workspace can use; on fewer, the apply is refused
+  ("needs 3 hosts, one server on each … make it with 1 server") and nothing
+  is made. It can't be pinned to one host (`placement_strategy = "host"` is
+  refused at plan time); automatic or a region works.
+- Each server has the `cpu` and `memory` given, so it counts 3 times the cpu
+  and memory toward the plan, and 1.5 times `disk_gi` (each server's disk is
+  half of `disk_gi`, rounded up to whole GiB).
+- **Its servers are fixed when it is made.** Changing `instances` on an
+  existing object storage, 1 to 3 or 3 to 1, is refused at plan time; it is
+  never replaced, since that would delete its files. To move, make a new object
+  storage under another name and copy the files over.
+- `servers_desired` and `servers_ready` say how many servers it runs and how
+  many are ready; it keeps serving with one down. Both are null on a store of
+  one server and on any other engine.
 
 ### Admin console
 
@@ -171,23 +202,25 @@ resource "livellm_storage" "eu_db" {
 
 - `version` (String) Engine major version, e.g. `16`. Object storage runs `"1"`; another is refused at plan time.
 - `disk_gi` (Number) Disk size in GiB, 5 when unset. Growing is an in-place update; shrinking is refused.
-- `instances` (Number) `1`, or `3` for Postgres: two standby copies, one of which takes over if the main one fails. Redis and object storage run as one instance; `3` is refused at plan time.
+- `instances` (Number) `1` (the default) or `3`. For Postgres, `3` is two standby copies, one of which takes over if the main one fails. For object storage, `3` is 3 servers, one on each of 3 hosts (it needs 3 hosts; never pinned to one), fixed when it is made: a change is refused at plan time. Redis runs as one instance; `3` is refused at plan time. Left out, the database keeps the instances it has (a configuration that drops `instances = 3` keeps 3; write `instances = 1` to go back to one on Postgres).
 - `cpu` (String) CPU, e.g. `1` or `500m`; `1` when unset.
 - `memory` (String) Memory, e.g. `1Gi`; `1Gi` when unset.
 - `username` (String) Application username (Postgres), or an object storage's access key. Left out, the platform names it `app` (an object storage gets a generated access key), and leaving it out later keeps the name the database has. Changing it replaces the database.
 - `expose` (Boolean) Expose the database externally over TLS. An object storage gets an HTTPS S3 address, path-style.
 - `allowlist` (List of String) Client CIDRs/IPs allowed when exposed. Empty = no IP restriction. It covers the database's exposed address only, not pgAdmin or Redis Commander; for an object storage it covers its S3 address and its admin console's.
 - `admin_console` (Boolean) The admin console (pgAdmin, Redis Commander, or the RustFS console for object storage). pgAdmin and Redis Commander answer from any network and sign in with `admin` and the database password. Left out, it keeps the state the database has. Turning it on sends `password_wo` in the same apply (a plan doing it without a new `password_wo_version` warns); for object storage that restarts it for a few seconds.
-- `backup` (Block) Backups, Postgres only (object storage keeps one copy and has none). With the block backups are on; without it they are off (a plan shows backups turned on or off elsewhere as a change).
+- `backup` (Block) Backups, Postgres only (object storage has none). With the block backups are on; without it they are off (a plan shows backups turned on or off elsewhere as a change).
   - `mode` (String) `daily` (the default): a full copy each night. `continuous`: the nightly copy plus every change in between, restorable to any minute inside `keep_days`. `manual`: nothing scheduled; backups taken by hand are kept.
   - `keep_days` (Number) How many days backups are kept, `1`..`365`; `10` when unset.
-- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down. With `host`, every copy of the database (`instances = 3`) runs on that host.
+- `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down. With `host`, every copy of a Postgres database (`instances = 3`) runs on that host; an object storage of 3 servers can't be pinned to one host (refused at plan time).
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
 - `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
 
 ### Read-Only
 
 - `ready` (Boolean) Whether the database is up.
+- `servers_desired` (Number) An object storage of 3 servers: how many servers it runs (`3`). Null for anything else.
+- `servers_ready` (Number) An object storage of 3 servers: how many of its servers are ready. It keeps serving with one down. Null for anything else.
 - `endpoints` (List of Object) Connection endpoints (`name`, `url`, `addr`, `tcp`, `udp`) — in-cluster and, when exposed, external (an object storage's are `s3` and `s3-external`).
 
 ## Import

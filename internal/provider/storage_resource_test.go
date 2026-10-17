@@ -295,7 +295,10 @@ func TestStorageConfigErrorsObjectStorage(t *testing.T) {
 		{"a backup block", func(m *storageModel) {
 			m.Backup = &storageBackupModel{Mode: types.StringNull(), KeepDays: types.Int64Null()}
 		}, "Object storage has no backups yet"},
-		{"three instances", func(m *storageModel) { m.Instances = types.Int64Value(3) }, "Object storage runs as one server"},
+		{"3 servers pinned to a host", func(m *storageModel) {
+			m.Instances = types.Int64Value(3)
+			m.PlacementStrategy = types.StringValue("host")
+		}, "An object storage of 3 servers can't be pinned to one host"},
 		{"another version", func(m *storageModel) { m.Version = types.StringValue("2") }, "Object storage runs version 1"},
 		{"a secret key ending with a space", func(m *storageModel) { m.PasswordWO = types.StringValue("secret-key ") },
 			"The secret key can't start or end with a space, tab or line break"},
@@ -310,6 +313,15 @@ func TestStorageConfigErrorsObjectStorage(t *testing.T) {
 		got := storageConfigErrors(m)
 		if len(got) != 1 || got[0][0] != c.want {
 			t.Errorf("%s: %v, want %q", c.name, got, c.want)
+		}
+	}
+	// 3 servers are offered: automatic or in a region, the platform counts
+	// the hosts.
+	for _, strategy := range []types.String{types.StringNull(), types.StringValue("region"), types.StringValue("auto")} {
+		m := baseStorage("s3")
+		m.Instances, m.PlacementStrategy = types.Int64Value(3), strategy
+		if got := storageConfigErrors(m); len(got) != 0 {
+			t.Errorf("3 servers, placement %v: %v", strategy, got)
 		}
 	}
 	// Values not known yet are left for the platform.
@@ -680,5 +692,117 @@ func TestStorageModifyPlanWarnings(t *testing.T) {
 		if !reflect.DeepEqual(got, c.wantWarningOn) {
 			t.Errorf("%s: warnings on %v, want %v", c.name, got, c.wantWarningOn)
 		}
+	}
+}
+
+// An existing object storage's servers can't change (the platform fixes them
+// when it is made, and a replacement would delete the files); a new store, a
+// replacement and other engines are left alone.
+func TestObjectStorageServersChange(t *testing.T) {
+	m := func(engine string, instances types.Int64) storageModel {
+		s := baseStorage(engine)
+		s.Name = types.StringValue("files")
+		s.Instances = instances
+		return s
+	}
+	one, three := types.Int64Value(1), types.Int64Value(3)
+	renamed := m("s3", three)
+	renamed.Name = types.StringValue("files-3")
+	for _, c := range []struct {
+		name        string
+		plan, state storageModel
+		refused     bool
+	}{
+		{"1 to 3", m("s3", three), m("s3", one), true},
+		{"3 to 1", m("s3", one), m("s3", three), true},
+		{"a store from before instances read back, to 3", m("s3", three), m("s3", types.Int64Null()), true},
+		{"a store from before instances read back, kept at 1", m("s3", one), m("s3", types.Int64Null()), false},
+		{"kept at 3", m("s3", three), m("s3", three), false},
+		{"kept at 1", m("s3", one), m("s3", one), false},
+		{"not known yet", m("s3", types.Int64Unknown()), m("s3", one), false},
+		{"another name: a new store", renamed, m("s3", one), false},
+		{"from postgres: a new store", m("s3", three), m("postgres", one), false},
+		{"postgres 1 to 3", m("postgres", three), m("postgres", one), false},
+	} {
+		got := objectStorageServersChange(c.plan, c.state)
+		if (got != nil) != c.refused {
+			t.Errorf("%s: %v, want refused %v", c.name, got, c.refused)
+		}
+		if got != nil && got[0] != "An object storage's servers can't be changed" {
+			t.Errorf("%s: summary %q", c.name, got[0])
+		}
+	}
+}
+
+// ModifyPlan puts the refusal on instances, as an error.
+func TestStorageModifyPlanServersChange(t *testing.T) {
+	ctx := context.Background()
+	var sr resource.SchemaResponse
+	(&storageResource{}).Schema(ctx, resource.SchemaRequest{}, &sr)
+	typ := sr.Schema.Type().TerraformType(ctx).(tftypes.Object)
+	value := func(instances any) tftypes.Value {
+		vals := map[string]tftypes.Value{}
+		for name, at := range typ.AttributeTypes {
+			vals[name] = tftypes.NewValue(at, nil)
+		}
+		vals["name"] = tftypes.NewValue(tftypes.String, "files")
+		vals["engine"] = tftypes.NewValue(tftypes.String, "s3")
+		vals["password_wo_version"] = tftypes.NewValue(tftypes.Number, 1)
+		vals["instances"] = tftypes.NewValue(tftypes.Number, instances)
+		return tftypes.NewValue(typ, vals)
+	}
+	req := resource.ModifyPlanRequest{
+		Config: tfsdk.Config{Schema: sr.Schema, Raw: value(3)},
+		Plan:   tfsdk.Plan{Schema: sr.Schema, Raw: value(3)},
+		State:  tfsdk.State{Schema: sr.Schema, Raw: value(1)},
+	}
+	resp := &resource.ModifyPlanResponse{Plan: req.Plan}
+	(&storageResource{}).ModifyPlan(ctx, req, resp)
+	errs := resp.Diagnostics.Errors()
+	if len(errs) != 1 {
+		t.Fatalf("errors %v, want one", resp.Diagnostics)
+	}
+	if wp, ok := errs[0].(diag.DiagnosticWithPath); !ok || !wp.Path().Equal(path.Root("instances")) {
+		t.Errorf("error not on instances: %v", errs[0])
+	}
+}
+
+// Instances read back as the platform holds them, and as 1 where it holds
+// none (it leaves the default out); a create that left them out takes them.
+func TestStorageInstancesReadBack(t *testing.T) {
+	for _, c := range []struct {
+		sp   map[string]any
+		want int64
+	}{
+		{map[string]any{"engine": "s3"}, 1},
+		{map[string]any{"engine": "s3", "instances": float64(3)}, 3},
+		{map[string]any{"engine": "postgres", "instances": float64(1)}, 1},
+		{map[string]any{"engine": "redis", "instances": float64(0)}, 1},
+	} {
+		st := baseStorage(c.sp["engine"].(string))
+		readStorage(&st, c.sp, false)
+		if !st.Instances.Equal(types.Int64Value(c.want)) {
+			t.Errorf("read %v: %v, want %d", c.sp, st.Instances, c.want)
+		}
+		m := baseStorage(c.sp["engine"].(string))
+		m.Instances = types.Int64Unknown()
+		m.Username, m.AdminConsole = types.StringNull(), types.BoolNull()
+		fillStorageFromSpec(&m, c.sp)
+		if !m.Instances.Equal(types.Int64Value(c.want)) {
+			t.Errorf("create from %v: %v, want %d", c.sp, m.Instances, c.want)
+		}
+	}
+	// Left out on a create and the store unreadable: the default.
+	m := baseStorage("s3")
+	m.Instances = types.Int64Unknown()
+	fillStorageFromSpec(&m, nil)
+	if !m.Instances.Equal(types.Int64Value(1)) {
+		t.Errorf("unreadable: %v", m.Instances)
+	}
+	// Not known on a create: nothing is sent, the platform picks.
+	u := baseStorage("s3")
+	u.Instances = types.Int64Unknown()
+	if v, ok := storageSpec(context.Background(), u, "", false)["instances"]; ok {
+		t.Errorf("unknown instances sent as %v", v)
 	}
 }

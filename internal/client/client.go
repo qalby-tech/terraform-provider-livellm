@@ -159,6 +159,15 @@ type WorkloadStatus struct {
 	// ProfilesReady: a browser's profile can be saved, restored, exported and
 	// imported (browsers only).
 	ProfilesReady bool `json:"profilesReady,omitempty"`
+	// Servers: an object storage of 3 servers, how many it runs and how many
+	// are ready (absent for anything else).
+	Servers *ServerCount `json:"servers,omitempty"`
+}
+
+// ServerCount is an object storage cluster's servers: desired and ready.
+type ServerCount struct {
+	Desired int `json:"desired"`
+	Ready   int `json:"ready"`
 }
 
 type TenantStatus struct {

@@ -57,7 +57,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			},
 			"engine": schema.StringAttribute{
 				Required: true,
-				Description: "postgres, redis or s3 (object storage: an S3 server with buckets, one copy, no backups). " +
+				Description: "postgres, redis or s3 (object storage: an S3 server with buckets, 1 server or 3, no backups). " +
 					"Changing it replaces the database.",
 				Validators: []validator.String{stringvalidator.OneOf("postgres", "redis", "s3")},
 				PlanModifiers: []planmodifier.String{
@@ -77,9 +77,15 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 			},
 			"instances": schema.Int64Attribute{
 				Optional: true,
-				Description: "1, or 3 for Postgres: two standby copies, one of which takes over if the main one fails. " +
-					"Redis and object storage run as one instance.",
-				Validators: []validator.Int64{int64validator.OneOf(1, 3)},
+				Computed: true,
+				Description: "1 (the default), or 3. For Postgres, 3 is two standby copies, one of which takes over if " +
+					"the main one fails. For object storage, 3 is 3 servers, one on each of 3 hosts, that keep reading " +
+					"and writing with one server down; it needs 3 hosts the workspace can use, can't be pinned to one " +
+					"host, and counts 3 times the cpu and memory and 1.5 times disk_gi toward the plan. An object " +
+					"storage's servers are fixed when it is made: a change is refused at plan time (make a new one). " +
+					"Redis runs as one instance. Left out, the resource keeps the instances it has.",
+				Validators:    []validator.Int64{int64validator.OneOf(1, 3)},
+				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
 			"cpu": schema.StringAttribute{
 				Optional:      true,
@@ -145,6 +151,15 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.Bool{keepSizeWhenUnset{}},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the database is up."},
+			"servers_desired": schema.Int64Attribute{
+				Computed:    true,
+				Description: "An object storage of 3 servers: how many servers it runs (3). Null for anything else.",
+			},
+			"servers_ready": schema.Int64Attribute{
+				Computed: true,
+				Description: "An object storage of 3 servers: how many of its servers are ready. It keeps serving with " +
+					"one down. Null for anything else.",
+			},
 			"endpoints": schema.ListNestedAttribute{
 				Computed: true,
 				Description: "Connection endpoints as reported by the platform (in-cluster and, when exposed, external; " +
@@ -163,7 +178,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
 			"backup": schema.SingleNestedBlock{
-				Description: "Backups (Postgres only; object storage keeps one copy and has none). With the block, " +
+				Description: "Backups (Postgres only; object storage has none). With the block, " +
 					"backups are on; without it, off. " +
 					"A backup restores into a new database; the one it came from keeps running.",
 				Attributes: map[string]schema.Attribute{
@@ -215,6 +230,8 @@ type storageModel struct {
 	AdminConsole      types.Bool          `tfsdk:"admin_console"`
 	Backup            *storageBackupModel `tfsdk:"backup"`
 	Ready             types.Bool          `tfsdk:"ready"`
+	ServersDesired    types.Int64         `tfsdk:"servers_desired"`
+	ServersReady      types.Int64         `tfsdk:"servers_ready"`
 	Endpoints         types.List          `tfsdk:"endpoints"`
 	PlacementStrategy types.String        `tfsdk:"placement_strategy"`
 	PlacementHost     types.String        `tfsdk:"placement_host"`
@@ -272,7 +289,7 @@ func storageSpec(ctx context.Context, m storageModel, password string, update bo
 	if !m.DiskGi.IsNull() && !m.DiskGi.IsUnknown() {
 		spec["storageSize"] = fmt.Sprintf("%dGi", m.DiskGi.ValueInt64())
 	}
-	if !m.Instances.IsNull() {
+	if known(m.Instances) {
 		spec["instances"] = m.Instances.ValueInt64()
 	}
 	if v := m.CPU.ValueString(); v != "" {
@@ -364,6 +381,15 @@ func storageAdminConsole(sp map[string]any) types.Bool {
 // password_wo_version changed, or when the admin console is being turned on
 // (the platform needs the password in the same write: the console signs in
 // with it); nothing otherwise.
+// storageInstances is how many instances the platform holds: one when it
+// holds none (it leaves the default out).
+func storageInstances(sp map[string]any) types.Int64 {
+	if v, ok := sp["instances"].(float64); ok && v > 0 {
+		return types.Int64Value(int64(v))
+	}
+	return types.Int64Value(1)
+}
+
 func storagePassword(plan, state storageModel, configured string) string {
 	if !plan.PasswordWOVersion.Equal(state.PasswordWOVersion) {
 		return configured
@@ -410,6 +436,9 @@ func fillStorageComputed(ctx context.Context, c *client.Client, m *storageModel,
 func fillStorageFromSpec(m *storageModel, sp map[string]any) {
 	if sp != nil {
 		readStorageSizes(m, sp)
+		if m.Instances.IsUnknown() {
+			m.Instances = storageInstances(sp)
+		}
 		// A console left out on create is what the platform made.
 		if m.AdminConsole.IsUnknown() {
 			m.AdminConsole = storageAdminConsole(sp)
@@ -428,6 +457,9 @@ func fillStorageFromSpec(m *storageModel, sp map[string]any) {
 	}
 	if m.DiskGi.IsUnknown() {
 		m.DiskGi = types.Int64Null()
+	}
+	if m.Instances.IsUnknown() {
+		m.Instances = types.Int64Value(1)
 	}
 	if m.CPU.IsUnknown() {
 		m.CPU = types.StringNull()
@@ -462,6 +494,40 @@ func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if w := consolePasswordWarning(plan, state); w != nil {
 		resp.Diagnostics.AddAttributeWarning(path.Root("password_wo"), w[0], w[1])
 	}
+	if e := objectStorageServersChange(plan, state); e != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("instances"), e[0], e[1])
+	}
+}
+
+// objectStorageServersChange refuses a change of an existing object storage's
+// servers (1 to 3 or 3 to 1): the platform fixes them when the store is made,
+// and replacing it would delete its files. A store saved before instances was
+// read back has none in state: it has one server. Nil when the plan keeps
+// them, makes the store anew (another name or engine) or isn't known yet.
+func objectStorageServersChange(plan, state storageModel) *[2]string {
+	if plan.Engine.ValueString() != "s3" || state.Engine.ValueString() != "s3" ||
+		plan.Name.ValueString() != state.Name.ValueString() || !known(plan.Instances) || state.Instances.IsUnknown() {
+		return nil
+	}
+	from := int64(1)
+	if !state.Instances.IsNull() {
+		from = state.Instances.ValueInt64()
+	}
+	to := plan.Instances.ValueInt64()
+	if from == to {
+		return nil
+	}
+	return &[2]string{"An object storage's servers can't be changed",
+		fmt.Sprintf("%s runs %s; its servers are fixed when it is made. Keep instances = %d, or make a new object "+
+			"storage with instances = %d under another name and copy the files over.",
+			plan.Name.ValueString(), serversWord(from), from, to)}
+}
+
+func serversWord(n int64) string {
+	if n == 1 {
+		return "1 server"
+	}
+	return fmt.Sprintf("%d servers", n)
 }
 
 // consoleOpenWarning warns when an object storage's console stays on although
@@ -546,11 +612,11 @@ func storageConfigErrors(m storageModel) [][2]string {
 	case "s3":
 		if m.Backup != nil {
 			errs = append(errs, [2]string{"Object storage has no backups yet",
-				"It keeps one copy of your files. Remove the backup settings."})
+				"Its files have no backups, on 1 server or 3. Remove the backup settings."})
 		}
-		if !m.Instances.IsUnknown() && m.Instances.ValueInt64() > 1 {
-			errs = append(errs, [2]string{"Object storage runs as one server",
-				"A second copy isn't offered yet. Set instances = 1 or leave it out."})
+		if known(m.Instances) && m.Instances.ValueInt64() == 3 && m.PlacementStrategy.ValueString() == "host" {
+			errs = append(errs, [2]string{"An object storage of 3 servers can't be pinned to one host",
+				"It runs one server on each of 3 hosts. Leave placement_strategy out (automatic) or choose a region."})
 		}
 		if v := m.Version; !v.IsUnknown() && !v.IsNull() && v.ValueString() != "1" {
 			errs = append(errs, [2]string{"Object storage runs version 1",
@@ -578,12 +644,16 @@ func storageConfigErrors(m storageModel) [][2]string {
 func refreshStorageStatus(ctx context.Context, c *client.Client, m *storageModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, m.Name.ValueString())
+	m.ServersDesired, m.ServersReady = types.Int64Null(), types.Int64Null()
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.Endpoints = types.ListValueMust(epType, []attr.Value{})
 		return
 	}
 	m.Ready = types.BoolValue(st.Ready)
+	if sv := st.Servers; sv != nil {
+		m.ServersDesired, m.ServersReady = types.Int64Value(int64(sv.Desired)), types.Int64Value(int64(sv.Ready))
+	}
 	eps := make([]endpointModel, 0, len(st.Endpoints))
 	for _, e := range st.Endpoints {
 		eps = append(eps, endpointModel{
@@ -670,9 +740,7 @@ func readStorage(state *storageModel, sp map[string]any, imported bool) {
 		}
 	}
 	readStorageSizes(state, sp)
-	if v, ok := sp["instances"].(float64); ok && v > 0 {
-		state.Instances = types.Int64Value(int64(v))
-	}
+	state.Instances = storageInstances(sp)
 	if v := storageUsername(sp); v != "" {
 		state.Username = types.StringValue(v)
 	}
