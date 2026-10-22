@@ -54,7 +54,8 @@ func (d *machineCoresDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 			"dedicated_fit": schema.Int64Attribute{
 				Computed: true,
 				Description: "The most cores of one speed a new machine can get on one server, any speed. With " +
-					"core_speed left out, more are refused as mixed core speeds unless mixed_speeds = true.",
+					"core_speed left out, more are refused as mixed core speeds unless mixed_speeds = true; where " +
+					"show_speed is false, or no server has room for that many, as no room on the servers.",
 			},
 		},
 	}

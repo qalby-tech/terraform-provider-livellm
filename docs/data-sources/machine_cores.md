@@ -43,7 +43,10 @@ cores than its speed's `fit` is refused ("Only 6 cores at 5.7 GHz are
 available. Continue with mixed core speeds?"), and one with `core_speed` left
 out and more cores than `dedicated_fit` is refused as mixed core speeds
 ("Mixed core speeds: this machine's cores run at different clock speeds."),
-unless `mixed_speeds = true` (see [`livellm_vm`](../resources/vm.md)).
+unless `mixed_speeds = true` (see [`livellm_vm`](../resources/vm.md)). Where
+the servers run at one speed (`show_speed` is `false`), or no server has room
+for that many cores at all, the refusal is "No server has room for this
+machine." instead, and `mixed_speeds` doesn't change it.
 
 The counts are for a new machine: once a machine is made its cores are no
 longer free, and the next plan reads less. Write `cpus` yourself rather than
