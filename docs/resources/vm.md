@@ -186,7 +186,10 @@ output "build_clock" { value = livellm_vm.build.running_core_speed } # 5700
 
 A change reaches a running machine at its next restart (`stopped = true`,
 then `false`). Left out of the configuration, each of the three keeps what the
-machine has, the console's choice included. `dedicated_cores = false` makes
+machine has, the console's choice included. A
+[replacement](../index.md#replacing-a-resource) makes a new machine, where the
+ones left out are off again: its cores are shared unless the configuration
+writes `dedicated_cores = true`. `dedicated_cores = false` makes
 the cores shared again and clears `core_speed` and `mixed_speeds`; on shared
 cores they are refused at plan time.
 
