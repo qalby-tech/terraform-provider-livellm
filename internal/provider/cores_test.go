@@ -280,6 +280,51 @@ func TestSharedCoreErrors(t *testing.T) {
 	}
 }
 
+// ValidateConfig itself (terraform validate) refuses a speed or mixed speeds
+// written next to dedicated_cores = false, which the platform drops on shared
+// cores so that every plan would show them again; core_speed = 0 and
+// mixed_speeds = false are what it holds there and pass. With
+// dedicated_cores left out, the machine's own decides at plan
+// (TestVMModifyPlanCores).
+func TestVMValidateConfigCores(t *testing.T) {
+	ctx := context.Background()
+	b := func(v bool) tftypes.Value { return tftypes.NewValue(tftypes.Bool, v) }
+	n := func(v int) tftypes.Value { return tftypes.NewValue(tftypes.Number, v) }
+	unknownNum := tftypes.NewValue(tftypes.Number, tftypes.UnknownValue)
+	for _, c := range []struct {
+		name      string
+		config    map[string]tftypes.Value
+		refusedOn []string
+	}{
+		{"shared at a speed", map[string]tftypes.Value{"dedicated_cores": b(false), "core_speed": n(5700)}, []string{"core_speed"}},
+		{"shared on mixed speeds", map[string]tftypes.Value{"dedicated_cores": b(false), "mixed_speeds": b(true)}, []string{"mixed_speeds"}},
+		{"shared with both", map[string]tftypes.Value{"dedicated_cores": b(false), "core_speed": n(4400), "mixed_speeds": b(true)},
+			[]string{"core_speed", "mixed_speeds"}},
+		{"shared, speed 0", map[string]tftypes.Value{"dedicated_cores": b(false), "core_speed": n(0), "mixed_speeds": b(false)}, nil},
+		{"shared, speed not known yet", map[string]tftypes.Value{"dedicated_cores": b(false), "core_speed": unknownNum}, nil},
+		{"dedicated at a speed", map[string]tftypes.Value{"dedicated_cores": b(true), "core_speed": n(5700), "mixed_speeds": b(true)}, nil},
+		{"dedicated left out", map[string]tftypes.Value{"core_speed": n(5700), "mixed_speeds": b(true)}, nil},
+	} {
+		sr, cfg := vmPlanValue(t, c.config)
+		resp := &resource.ValidateConfigResponse{}
+		(&vmResource{}).ValidateConfig(ctx, resource.ValidateConfigRequest{Config: tfsdk.Config{Schema: sr.Schema, Raw: cfg}}, resp)
+		errs := resp.Diagnostics.Errors()
+		if len(errs) != len(c.refusedOn) {
+			t.Errorf("%s: %v, want errors on %v", c.name, resp.Diagnostics, c.refusedOn)
+			continue
+		}
+		for i, e := range errs {
+			wp, ok := e.(diag.DiagnosticWithPath)
+			if !ok || !wp.Path().Equal(path.Root(c.refusedOn[i])) {
+				t.Errorf("%s: error %d not on %s: %v", c.name, i, c.refusedOn[i], e)
+			}
+			if !strings.Contains(e.Summary(), "is for dedicated cores") || !strings.Contains(e.Detail(), "dedicated_cores = true") {
+				t.Errorf("%s: %q / %q", c.name, e.Summary(), e.Detail())
+			}
+		}
+	}
+}
+
 // The four refusals keep the platform's (the owner's) words and say what to
 // write: the console's "Use N cores" is cpus = N, "Continue with mixed
 // speeds" is mixed_speeds = true.
