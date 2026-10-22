@@ -468,3 +468,160 @@ func TestWarnCoresNotKept(t *testing.T) {
 		}
 	}
 }
+
+// planCoreChoice runs a core setting's own plan modifiers as the framework
+// does when the configuration leaves it out: planned unknown (it is
+// computed), against the prior state given (null on a create).
+func planCoreChoice(t *testing.T, sch schema.Schema, cfg tfsdk.Config, st tfsdk.State, pl tfsdk.Plan, a string) tftypes.Value {
+	t.Helper()
+	ctx := context.Background()
+	p := path.Root(a)
+	switch at := sch.Attributes[a].(type) {
+	case schema.BoolAttribute:
+		sv := types.BoolNull()
+		if !st.Raw.IsNull() {
+			st.GetAttribute(ctx, p, &sv)
+		}
+		req := planmodifier.BoolRequest{Path: p, Config: cfg, ConfigValue: types.BoolNull(), State: st, StateValue: sv,
+			Plan: pl, PlanValue: types.BoolUnknown()}
+		resp := &planmodifier.BoolResponse{PlanValue: req.PlanValue}
+		for _, m := range at.PlanModifiers {
+			m.PlanModifyBool(ctx, req, resp)
+			req.PlanValue = resp.PlanValue
+		}
+		v, _ := resp.PlanValue.ToTerraformValue(ctx)
+		return v
+	case schema.Int64Attribute:
+		sv := types.Int64Null()
+		if !st.Raw.IsNull() {
+			st.GetAttribute(ctx, p, &sv)
+		}
+		req := planmodifier.Int64Request{Path: p, Config: cfg, ConfigValue: types.Int64Null(), State: st, StateValue: sv,
+			Plan: pl, PlanValue: types.Int64Unknown()}
+		resp := &planmodifier.Int64Response{PlanValue: req.PlanValue}
+		for _, m := range at.PlanModifiers {
+			m.PlanModifyInt64(ctx, req, resp)
+			req.PlanValue = resp.PlanValue
+		}
+		v, _ := resp.PlanValue.ToTerraformValue(ctx)
+		return v
+	}
+	t.Fatalf("%s: %T", a, sch.Attributes[a])
+	return tftypes.Value{}
+}
+
+// platformKeepsCores is what the platform stores of a machine's core
+// settings (tenant-api spec.CarryCoreChoice): one a save leaves out is the
+// stored machine's, then only true and a clock, and only with dedicated
+// cores.
+func platformKeepsCores(was, sent map[string]any) map[string]any {
+	held := map[string]any{}
+	for _, k := range []string{"dedicatedCores", "mixedSpeeds", "coreSpeed"} {
+		v, ok := sent[k]
+		if !ok {
+			v = was[k]
+		}
+		switch x := v.(type) {
+		case bool:
+			if x {
+				held[k] = true
+			}
+		case int64:
+			if x > 0 {
+				held[k] = float64(x)
+			}
+		case float64:
+			if x > 0 {
+				held[k] = x
+			}
+		}
+	}
+	if held["dedicatedCores"] != true {
+		return map[string]any{}
+	}
+	return held
+}
+
+// A replacement is planned twice: as an update of the old machine, where a
+// change such as os asks for it, then by Terraform as a create with a null
+// prior state, whose plan is the one applied. A machine whose configuration
+// leaves the core settings out (dedicated at 5.7 GHz from the console) is
+// replaced as any new machine is made, shared: the create half plans false,
+// 0 and false, the create sends all three (the platform would keep the old
+// machine's for a setting left out), and the shared machine the platform
+// stores reads back as planned, so the next plan is empty.
+func TestVMReplaceCores(t *testing.T) {
+	ctx := context.Background()
+	b := func(v bool) tftypes.Value { return tftypes.NewValue(tftypes.Bool, v) }
+	n := func(v int) tftypes.Value { return tftypes.NewValue(tftypes.Number, v) }
+	s := func(v string) tftypes.Value { return tftypes.NewValue(tftypes.String, v) }
+	unknownBool := tftypes.NewValue(tftypes.Bool, tftypes.UnknownValue)
+	unknownNum := tftypes.NewValue(tftypes.Number, tftypes.UnknownValue)
+	type vals = map[string]tftypes.Value
+	cores := []string{"dedicated_cores", "core_speed", "mixed_speeds"}
+	held := vals{"os": s("ubuntu"), "dedicated_cores": b(true), "core_speed": n(5700), "mixed_speeds": b(false)}
+	sr, oldRaw := vmPlanValue(t, held)
+	sch := sr.Schema
+	_, cfgRaw := vmPlanValue(t, vals{"os": s("debian")})
+	_, proposedRaw := vmPlanValue(t, vals{"os": s("debian"), "dedicated_cores": unknownBool, "core_speed": unknownNum,
+		"mixed_speeds": unknownBool})
+	cfg := tfsdk.Config{Schema: sch, Raw: cfgRaw}
+	old := tfsdk.State{Schema: sch, Raw: oldRaw}
+	none := tfsdk.State{Schema: sch, Raw: tftypes.NewValue(sch.Type().TerraformType(ctx), nil)}
+	proposed := tfsdk.Plan{Schema: sch, Raw: proposedRaw}
+
+	// The update half: os replaces the machine; the settings left out keep
+	// the old machine's (that plan is not the one applied).
+	if !replacing(ctx, modifyPlanReq(ctx, sch, held, vals{"os": s("debian"), "dedicated_cores": b(true),
+		"core_speed": n(5700), "mixed_speeds": b(false)})) {
+		t.Fatal("a change of os doesn't replace the machine")
+	}
+	for _, a := range cores {
+		if got := planCoreChoice(t, sch, cfg, old, proposed, a); !got.Equal(held[a]) {
+			t.Errorf("update half: %s planned %v, want %v", a, got, held[a])
+		}
+	}
+
+	// The create half, the plan applied: the platform's default, known now.
+	planned := vals{"os": s("debian")}
+	for _, a := range cores {
+		planned[a] = planCoreChoice(t, sch, cfg, none, proposed, a)
+	}
+	_, planRaw := vmPlanValue(t, planned)
+	req := resource.ModifyPlanRequest{Config: cfg, Plan: tfsdk.Plan{Schema: sch, Raw: planRaw}, State: none}
+	resp := &resource.ModifyPlanResponse{Plan: req.Plan}
+	(&vmResource{}).ModifyPlan(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("create half: %v", resp.Diagnostics)
+	}
+	var m vmResourceModel
+	if d := resp.Plan.Get(ctx, &m); d.HasError() {
+		t.Fatalf("plan: %v", d)
+	}
+	if !m.DedicatedCores.Equal(types.BoolValue(false)) || !m.CoreSpeed.Equal(types.Int64Value(0)) ||
+		!m.MixedSpeeds.Equal(types.BoolValue(false)) {
+		t.Fatalf("create half planned %v %v %v, want false 0 false", m.DedicatedCores, m.CoreSpeed, m.MixedSpeeds)
+	}
+
+	// The create sends all three, so nothing of the old machine is kept even
+	// where the platform still holds it, and what it stores reads as planned.
+	sent := vmSpec(ctx, m, vmWrite{create: true})
+	if sent["dedicatedCores"] != false || sent["coreSpeed"] != int64(0) || sent["mixedSpeeds"] != false {
+		t.Errorf("sent %v %v %v", sent["dedicatedCores"], sent["coreSpeed"], sent["mixedSpeeds"])
+	}
+	oldVM := map[string]any{"dedicatedCores": true, "coreSpeed": float64(5700)}
+	for name, was := range map[string]map[string]any{"old machine gone": nil, "old machine still held": oldVM} {
+		var read vmResourceModel
+		readVMCores(&read, platformKeepsCores(was, sent))
+		if !read.DedicatedCores.Equal(m.DedicatedCores) || !read.CoreSpeed.Equal(m.CoreSpeed) ||
+			!read.MixedSpeeds.Equal(m.MixedSpeeds) {
+			t.Errorf("%s: reads %v %v %v, planned %v %v %v", name, read.DedicatedCores, read.CoreSpeed, read.MixedSpeeds,
+				m.DedicatedCores, m.CoreSpeed, m.MixedSpeeds)
+		}
+	}
+	// (Left out of the create, as an unknown size is, the old machine's
+	// would be kept: that is why the create half plans them known.)
+	if got := platformKeepsCores(oldVM, map[string]any{}); got["dedicatedCores"] != true {
+		t.Errorf("the platform's carry, as modelled: %v", got)
+	}
+}
