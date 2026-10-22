@@ -31,7 +31,7 @@ resource "livellm_vm" "build" {
 }
 
 output "core_speeds" {
-  # Fastest first: [{ speed = 5700, fit = 6 }, { speed = 4400, fit = 16 }]
+  # Fastest first: [{ speed = 5700, fit = 12 }, { speed = 4400, fit = 16 }]
   value = data.livellm_machine_cores.this.speeds
 }
 ```
