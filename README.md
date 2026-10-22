@@ -94,8 +94,9 @@ OpenTofu 1.11+.
 
 ## Examples
 
-- [`examples/basic`](examples/basic) — provider setup plus the
-  `livellm_workspace` data source. Full per-resource examples live in the
+- [`examples/basic`](examples/basic) — provider setup, the
+  `livellm_workspace` data source and a machine with dedicated cores. Full
+  per-resource examples live in the
   [registry documentation](https://registry.terraform.io/providers/qalby-tech/livellm/latest/docs).
 
 ## Developing the provider
