@@ -155,7 +155,7 @@ func sharedCoreErrors(dedicated, cfgMixed types.Bool, cfgSpeed types.Int64) [][3
 	}
 	if known(cfgMixed) && cfgMixed.ValueBool() {
 		errs = append(errs, [3]string{"mixed_speeds", "mixed_speeds is for dedicated cores",
-			"Shared cores may always run at different speeds. Set dedicated_cores = true, or leave mixed_speeds out."})
+			"Shared cores may run at different speeds anyway. Set dedicated_cores = true, or leave mixed_speeds out."})
 	}
 	return errs
 }
