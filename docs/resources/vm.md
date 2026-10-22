@@ -1,7 +1,7 @@
 ---
 page_title: "livellm_vm Resource - livellm"
 description: |-
-  A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server — with ports, a stop time and placement.
+  A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server — with ports, a stop time, placement and dedicated cores.
 ---
 
 # livellm_vm (Resource)
@@ -163,6 +163,54 @@ resource "livellm_vm" "build" {
 }
 ```
 
+With dedicated cores: every core reserved for the machine on its server,
+instead of shared (the default), which may be slower when the server is busy.
+On servers whose cores run at different clock speeds, the cores are all of one
+speed: `core_speed` asks for one, in MHz, and left out the platform picks any
+cores of one speed that fit. Where every server has one speed, leave
+`core_speed` out:
+
+```terraform
+resource "livellm_vm" "build" {
+  name      = "build-box"
+  cpus      = 8
+  memory_gi = 16
+  # …credentials…
+
+  dedicated_cores = true
+  core_speed      = 5700 # 5.7 GHz; optional
+}
+
+output "build_clock" { value = livellm_vm.build.running_core_speed } # 5700
+```
+
+A change reaches a running machine at its next restart (`stopped = true`,
+then `false`). Left out of the configuration, each of the three keeps what the
+machine has, the console's choice included. `dedicated_cores = false` makes
+the cores shared again and clears `core_speed` and `mixed_speeds`; on shared
+cores they are refused at plan time.
+
+When the cores can't be had, the apply stops with the platform's words and
+what to write instead:
+
+| The platform says | What to write |
+|---|---|
+| "Only 6 cores at 5.7 GHz are available. Continue with mixed core speeds?" | `cpus = 6`, or `mixed_speeds = true` |
+| "Mixed core speeds: this machine's cores run at different clock speeds." | `cpus` = the most of one speed that fit (the error names it), or `mixed_speeds = true` |
+| "No server this machine may run on has cores at 3 GHz." | a `core_speed` the servers have, or `0` for any one speed |
+
+`mixed_speeds = true` keeps the count with cores that may run at different
+speeds, and `running_mixed_speeds` then reads `true`; `false` asks for cores
+of one speed again, which can be refused as above. A platform without
+dedicated cores ignores the three settings: the apply warns ("Cores not kept
+as written") and the cores stay shared.
+
+Any machine, shared or dedicated, that is new, started, grown or moved needs
+room on a server it may run on: else the apply stops with "This server is
+full: it has no room for this machine." (or "No server has room for this
+machine."). Stop or shrink another machine, or give this one fewer cores or
+less memory.
+
 ## Schema
 
 ### Required
@@ -177,9 +225,12 @@ resource "livellm_vm" "build" {
 - `os` (String) The system: `ubuntu` (24.04), `debian` (13), `fedora` (44) or `windows`. Debian and Fedora are servers only. Replaces the VM when changed. Defaults to `ubuntu`.
 - `windows_edition` (String) With `os = "windows"`: `desktop` (Windows 11 Pro, the default) or `server` (Windows Server 2025, Server Core). Replaces the VM when changed.
 - `desktop` (Boolean) An Ubuntu desktop instead of a terminal VM (not with `os = "windows"`). Replaces the VM when changed. Defaults to `false`.
-- `cpus` (Number) vCPU count. Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
+- `cpus` (Number) How many cores (a core is one host thread). Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
 - `memory_gi` (Number) Memory in GiB. Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
 - `disk_gi` (Number) Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out). Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
+- `dedicated_cores` (Boolean) Every core reserved for this machine on its server, instead of shared (the default). On servers whose cores run at different clock speeds, they are all of one speed. Left out, the machine keeps what it has (`false` on a new machine); `false` makes them shared. A change reaches a running machine at its next restart. See [the example](#example-usage) for the refusals.
+- `core_speed` (Number) With `dedicated_cores`, where the servers' cores run at different clock speeds: the clock in MHz of the cores to get (`5700` for 5.7 GHz), one of the servers' speeds. `0` (the default): any cores of one speed. Left out, the machine keeps what it has. Refused at plan time on shared cores.
+- `mixed_speeds` (Boolean) With `dedicated_cores`: keep this many cores although no single clock speed has that many free, so they may run at different speeds (the console's Continue with mixed speeds). Left out, the machine keeps what it has (`false` on a new machine); `false` asks for cores of one speed again. Refused at plan time on shared cores.
 - `ssh_keys` (List of String) SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. On Windows they open SSH, with PowerShell as its shell. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
@@ -208,6 +259,8 @@ resource "livellm_vm" "build" {
 - `ssh` (String) `host:port` to SSH into the VM.
 - `url` (String) The first exposed HTTP port's public HTTPS URL.
 - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`).
+- `running_core_speed` (Number) The clock in MHz of the cores the running machine got, when they are all of one speed. Null while it isn't running, when they run at different speeds, and where the servers list no speeds.
+- `running_mixed_speeds` (Boolean) `true` when the running machine's cores run at different clock speeds (the console's "Mixed core speeds: this machine's cores run at different clock speeds."), `false` when they are all of one speed. Null while it isn't running and where the servers list no speeds.
 
 ## Import
 

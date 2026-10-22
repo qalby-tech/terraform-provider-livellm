@@ -46,7 +46,7 @@ configuration; keys are secrets.
 
 | Resource | What it creates |
 |---|---|
-| [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, the databases it reaches |
+| [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, the databases it reaches, dedicated cores |
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres, Redis or object storage (S3), backups, admin console, external access |
 | [`livellm_browser`](resources/browser.md) | A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |

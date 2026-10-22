@@ -35,4 +35,6 @@ output "all_ready" {
   - `phase` (String) Lifecycle phase.
   - `ssh` (String) `host:port` for SSH. Empty until assigned.
   - `url` (String) First exposed HTTP port's URL, if any.
+  - `running_core_speed` (Number) Clock in MHz of the running VM's cores, when they are all of one speed; else null.
+  - `running_mixed_speeds` (Boolean) `true` when the running VM's cores run at different clock speeds; null when it isn't running or the servers list no speeds.
   - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`).

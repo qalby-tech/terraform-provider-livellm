@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- **Dedicated cores.** `livellm_vm` takes `dedicated_cores = true`: every
+  core reserved for the machine on its server, instead of shared (the
+  default), which may be slower when the server is busy. On servers whose
+  cores run at different clock speeds the cores are all of one speed:
+  `core_speed` asks for one, in MHz (`5700` for 5.7 GHz; left out or `0`, any
+  one speed), and `mixed_speeds = true` keeps the count with cores that may
+  run at different speeds. A change reaches a running machine at its next
+  restart.
+- The three are optional and computed, as the sizes are: left out, a machine
+  keeps what it has, the console's choice included, and a new one is shared;
+  `false` and `0` clear. `dedicated_cores = false` clears `core_speed` and
+  `mixed_speeds`, and setting either on shared cores is an error at plan
+  time. A refresh and an import read all three.
+- **Cores and room refused in the platform's words.** A create or an update
+  the platform refuses says what it said and what to write: too few cores at
+  the speed asked for ("Only 6 cores at 5.7 GHz are available. Continue with
+  mixed core speeds?") or no single speed with the cores ("Mixed core speeds:
+  this machine's cores run at different clock speeds."): `cpus` = the most
+  that fit, or `mixed_speeds = true`; a speed no server has ("No server this
+  machine may run on has cores at 3 GHz."): another `core_speed`, or `0`; no
+  room ("This server is full: it has no room for this machine." / "No server
+  has room for this machine.", any machine that is new, started, grown or
+  moved): stop or shrink another machine, or ask for less.
+- `running_core_speed` and `running_mixed_speeds` (computed, on `livellm_vm`
+  and on the `livellm_vm` and `livellm_vms` data sources): the clock in MHz of
+  the running machine's cores when they are all of one speed, or that they
+  run at different clock speeds; null while it isn't running and where the
+  servers list no speeds.
+- `cpus` is described in cores (a core is one host thread).
+- Needs a LiveLLM API with dedicated cores. An older one ignores the three
+  settings: the apply warns ("Cores not kept as written") and the cores stay
+  shared; nothing changes for a machine that doesn't ask for them.
+
 ## 0.18.0
 
 - **Object storage of 3 servers.** `livellm_storage` with `engine = "s3"`
