@@ -161,8 +161,11 @@ func sharedCoreErrors(dedicated, cfgMixed types.Bool, cfgSpeed types.Int64) [][3
 }
 
 // warnCoresNotKept warns when the platform holds other core settings than
-// the write sent: a platform older than this provider ignores them, and the
-// machine's cores stay shared.
+// the write sent, in words true whatever the cause: a platform older than
+// this provider ignores all three (the machine's cores stay shared), and any
+// platform drops core_speed and mixed_speeds on shared cores. (A speed next
+// to a dedicated_cores known only at apply never gets that far: the apply's
+// own plan refuses it, as planVMCores does.)
 func warnCoresNotKept(id string, planned vmResourceModel, sp map[string]any, diags *diag.Diagnostics) {
 	if sp == nil {
 		return
@@ -183,8 +186,9 @@ func warnCoresNotKept(id string, planned vmResourceModel, sp map[string]any, dia
 		return
 	}
 	diags.AddWarning("Cores not kept as written",
-		fmt.Sprintf("%q doesn't hold %s as written. A platform older than this provider doesn't have dedicated "+
-			"cores, so the machine's cores stay shared: the next plan shows the difference.", id, strings.Join(differ, ", ")))
+		fmt.Sprintf("%q doesn't hold %s as written. The platform keeps core_speed and mixed_speeds only with dedicated "+
+			"cores, and one older than this provider has no dedicated cores, so its machines' cores stay shared. "+
+			"The next refresh reads what the machine holds.", id, strings.Join(differ, ", ")))
 }
 
 // runningCores fills the clock of a running machine's cores from its status

@@ -479,37 +479,57 @@ func TestVMReadCores(t *testing.T) {
 	}
 }
 
-// After a write, a platform that didn't keep the cores (one older than this
-// provider ignores them) is warned about; one that kept them, and false or 0
-// sent to an older one, are not.
+// After a write, a platform that didn't keep the cores is warned about, in
+// words true whatever the cause: one older than this provider ignores them,
+// and any drops a speed sent with shared cores. One that kept them, and false
+// or 0 sent to an older one, are not warned about.
 func TestWarnCoresNotKept(t *testing.T) {
 	ctx := context.Background()
 	asked := vmResourceModel{Name: types.StringValue("box"), SSHKeys: types.ListNull(types.StringType),
 		CPUs: types.Int64Value(8), MemoryGi: types.Int64Value(16), DiskGi: types.Int64Value(80),
 		DedicatedCores: types.BoolValue(true), MixedSpeeds: types.BoolValue(false), CoreSpeed: types.Int64Value(5700)}
+	sharedWithSpeed := asked
+	sharedWithSpeed.DedicatedCores = types.BoolValue(false)
 	for _, c := range []struct {
 		name  string
 		vm    map[string]any
 		plan  vmResourceModel
-		warns bool
+		names string // the settings the warning names; "" for none
 	}{
-		{"an older platform", map[string]any{"cpus": float64(8)}, asked, true},
-		{"kept", map[string]any{"cpus": float64(8), "dedicatedCores": true, "coreSpeed": float64(5700)}, asked, false},
+		{"an older platform", map[string]any{"cpus": float64(8)}, asked, `"box" doesn't hold dedicated_cores, core_speed as written.`},
+		{"kept", map[string]any{"cpus": float64(8), "dedicatedCores": true, "coreSpeed": float64(5700)}, asked, ""},
 		{"shared, on an older platform", map[string]any{"cpus": float64(8)}, func() vmResourceModel {
 			m := asked
 			m.DedicatedCores, m.CoreSpeed = types.BoolValue(false), types.Int64Value(0)
 			return m
-		}(), false},
+		}(), ""},
+		{"shared cores, a speed sent", map[string]any{"cpus": float64(8)}, sharedWithSpeed, `"box" doesn't hold core_speed as written.`},
 	} {
 		m := c.plan
 		cl := coresPlatform(t, client.Workload{ID: "box", Type: "vm-ubuntu", VM: c.vm}, `{"id":"box","type":"vm-ubuntu","ready":true}`)
 		var diags diag.Diagnostics
 		refreshVMSpec(ctx, cl, &m, &diags)
-		if got := len(diags.Warnings()) == 1 && diags.Warnings()[0].Summary() == "Cores not kept as written"; got != c.warns {
-			t.Errorf("%s: %v, want warned %v", c.name, diags, c.warns)
+		warns := c.names != ""
+		if got := len(diags.Warnings()) == 1 && diags.Warnings()[0].Summary() == "Cores not kept as written"; got != warns {
+			t.Errorf("%s: %v, want warned %v", c.name, diags, warns)
+			continue
 		}
-		if c.warns && !strings.Contains(diags.Warnings()[0].Detail(), "dedicated_cores, core_speed") {
-			t.Errorf("%s: names %q", c.name, diags.Warnings()[0].Detail())
+		if !warns {
+			continue
+		}
+		d := diags.Warnings()[0].Detail()
+		if !strings.HasPrefix(d, c.names) {
+			t.Errorf("%s: names %q, want %q", c.name, d, c.names)
+		}
+		for _, w := range []string{"keeps core_speed and mixed_speeds only with dedicated cores", "one older than this provider has no dedicated cores"} {
+			if !strings.Contains(d, w) {
+				t.Errorf("%s: detail %q lacks %q", c.name, d, w)
+			}
+		}
+		for _, w := range []string{"doesn't have dedicated cores, so the machine's", "the next plan shows the difference"} {
+			if strings.Contains(d, w) {
+				t.Errorf("%s: detail %q says %q, true of one cause only", c.name, d, w)
+			}
 		}
 	}
 }
