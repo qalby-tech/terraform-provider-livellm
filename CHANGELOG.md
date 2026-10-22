@@ -32,6 +32,13 @@
   the running machine's cores when they are all of one speed, or that they
   run at different clock speeds; null while it isn't running and where the
   servers list no speeds.
+- The `livellm_machine_cores` data source: what a new machine with dedicated
+  cores can get. `speeds` lists the servers' clock speeds, fastest first
+  (`speed`, the values `core_speed` takes), each with `fit`, the most cores of
+  it a new machine can get on one server; `dedicated_fit` is the most of one
+  speed, any speed. Where every server runs at one speed, `show_speed` is
+  `false` and `speeds` empty. On an API without dedicated cores the read
+  fails ("Cannot read the cores").
 - `cpus` is described in cores (a core is one host thread).
 - Needs a LiveLLM API with dedicated cores. An older one ignores the three
   settings: the apply warns ("Cores not kept as written") and the cores stay

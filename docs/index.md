@@ -55,7 +55,8 @@ configuration; keys are secrets.
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md),
-[`livellm_hosts`](data-sources/hosts.md).
+[`livellm_hosts`](data-sources/hosts.md),
+[`livellm_machine_cores`](data-sources/machine_cores.md).
 
 Every resource can say where it runs with `placement_strategy`,
 `placement_region` and `placement_host`. Left out, LiveLLM picks the host (the
