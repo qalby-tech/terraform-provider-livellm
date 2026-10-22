@@ -85,6 +85,11 @@ resource "livellm_browser" "pinned" {
 }
 ```
 
+Like every resource, a browser needs room on a server it may run on when it is
+new, started, grown or moved, else the apply stops with "This server is full:
+it has no room for this browser." (or "No server has room for this browser."):
+stop or shrink another resource, or give this one fewer cores or less memory.
+
 ## Locale and time zone
 
 `locale`, `timezone`, `languages` and `geolocation` restart the browser when

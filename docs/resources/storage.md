@@ -189,6 +189,12 @@ resource "livellm_storage" "eu_db" {
 }
 ```
 
+Like every resource, a database or an object storage needs room on a server it
+may run on when it is new, started, grown or moved, else the apply stops with
+"This server is full: it has no room for this database." (or "No server has
+room for this database."; for object storage, "this object storage"): stop or
+shrink another resource, or give this one fewer cores or less memory.
+
 ## Schema
 
 ### Required

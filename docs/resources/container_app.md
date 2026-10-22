@@ -302,6 +302,11 @@ resource "livellm_container_app" "near" {
 }
 ```
 
+Like every resource, an app needs room on a server it may run on when it is
+new, started, grown or moved, else the apply stops with "This server is full:
+it has no room for this app." (or "No server has room for this app."): stop or
+shrink another resource, or give this one fewer cores or less memory.
+
 ## Schema
 
 ### Required
