@@ -167,8 +167,10 @@ With dedicated cores: every core reserved for the machine on its server,
 instead of shared (the default), which may be slower when the server is busy.
 On servers whose cores run at different clock speeds, the cores are all of one
 speed: `core_speed` asks for one, in MHz, and left out the platform picks any
-cores of one speed that fit. Where every server has one speed, leave
-`core_speed` out:
+cores of one speed that fit.
+[`livellm_machine_cores`](../data-sources/machine_cores.md) lists the servers'
+speeds and how many cores of each a new machine can get. Where every server
+has one speed, leave `core_speed` out:
 
 ```terraform
 resource "livellm_vm" "build" {
@@ -232,7 +234,7 @@ fewer cores or less memory.
 - `memory_gi` (Number) Memory in GiB. Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
 - `disk_gi` (Number) Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out). Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
 - `dedicated_cores` (Boolean) Every core reserved for this machine on its server, instead of shared (the default). On servers whose cores run at different clock speeds, they are all of one speed. Left out, the machine keeps what it has (`false` on a new machine); `false` makes them shared. A change reaches a running machine at its next restart. See [the example](#example-usage) for the refusals.
-- `core_speed` (Number) With `dedicated_cores`, where the servers' cores run at different clock speeds: the clock in MHz of the cores to get (`5700` for 5.7 GHz), one of the servers' speeds. `0` (the default): any cores of one speed. Left out, the machine keeps what it has. A speed above `0` is refused at plan time on shared cores.
+- `core_speed` (Number) With `dedicated_cores`, where the servers' cores run at different clock speeds: the clock in MHz of the cores to get (`5700` for 5.7 GHz), one of the servers' speeds (the [`livellm_machine_cores`](../data-sources/machine_cores.md) data source lists them). `0` (the default): any cores of one speed. Left out, the machine keeps what it has. A speed above `0` is refused at plan time on shared cores.
 - `mixed_speeds` (Boolean) With `dedicated_cores`: keep this many cores although no single clock speed has that many free, so they may run at different speeds (the console's Continue with mixed speeds). Left out, the machine keeps what it has (`false` on a new machine); `false` asks for cores of one speed again. Refused at plan time on shared cores.
 - `ssh_keys` (List of String) SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. On Windows they open SSH, with PowerShell as its shell. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.

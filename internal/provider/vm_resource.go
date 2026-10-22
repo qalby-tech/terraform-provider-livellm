@@ -120,8 +120,8 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Optional: true,
 				Computed: true,
 				Description: "With dedicated_cores, where the servers' cores run at different clock speeds: the clock in MHz " +
-					"of the cores to get (5700 for 5.7 GHz), one of the servers' speeds. 0 (the default): any cores of one " +
-					"speed. Left out, the machine keeps what it has.",
+					"of the cores to get (5700 for 5.7 GHz), one of the servers' speeds (the livellm_machine_cores data source " +
+					"lists them). 0 (the default): any cores of one speed. Left out, the machine keeps what it has.",
 				Validators:    []validator.Int64{int64validator.AtLeast(0)},
 				PlanModifiers: []planmodifier.Int64{keepCoreChoice{}},
 			},
