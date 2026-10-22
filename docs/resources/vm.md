@@ -205,11 +205,11 @@ of one speed again, which can be refused as above. A platform without
 dedicated cores ignores the three settings: the apply warns ("Cores not kept
 as written") and the cores stay shared.
 
-Any machine, shared or dedicated, that is new, started, grown or moved needs
-room on a server it may run on: else the apply stops with "This server is
-full: it has no room for this machine." (or "No server has room for this
-machine."). Stop or shrink another machine, or give this one fewer cores or
-less memory.
+Like every resource, a machine, shared or dedicated, needs room on a server it
+may run on when it is new, started, grown or moved, else the apply stops with
+"This server is full: it has no room for this machine." (or "No server has
+room for this machine."): stop or shrink another resource, or give this one
+fewer cores or less memory.
 
 ## Schema
 
