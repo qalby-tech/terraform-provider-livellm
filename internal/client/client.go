@@ -306,3 +306,30 @@ func (c *Client) FleetHosts(ctx context.Context) ([]Host, error) {
 	}
 	return out.Hosts, nil
 }
+
+// CoreSpeedRoom is one of the servers' clock speeds and the most cores of it
+// a new machine with dedicated cores can get on one server.
+type CoreSpeedRoom struct {
+	SpeedMHz int `json:"speedMHz"`
+	Fit      int `json:"fit"`
+}
+
+// MachineCores is what a new machine with dedicated cores can get (GET
+// /v1/machine-cores): whether a speed can be asked for at all, each speed's
+// room, fastest first (none where every server runs at one speed), and the
+// most cores of one speed on one server, any speed.
+type MachineCores struct {
+	ShowSpeed    bool            `json:"showSpeed"`
+	Speeds       []CoreSpeedRoom `json:"speeds"`
+	DedicatedFit int             `json:"dedicatedFit"`
+}
+
+// MachineCores reads the cores a new machine with dedicated cores can get on
+// the servers the key's workspace may run on.
+func (c *Client) MachineCores(ctx context.Context) (*MachineCores, error) {
+	var mc MachineCores
+	if err := c.do(ctx, http.MethodGet, "/v1/machine-cores", nil, &mc); err != nil {
+		return nil, err
+	}
+	return &mc, nil
+}

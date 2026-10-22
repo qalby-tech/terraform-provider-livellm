@@ -109,5 +109,6 @@ func (p *livellmProvider) DataSources(_ context.Context) []func() datasource.Dat
 		NewVMDataSource,
 		NewVMsDataSource,
 		NewHostsDataSource,
+		NewMachineCoresDataSource,
 	}
 }
