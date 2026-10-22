@@ -33,7 +33,7 @@ import (
 // where it comes from.
 func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
-	if errors.As(err, &apiErr) && coresDiag(diags, summary, apiErr) {
+	if errors.As(err, &apiErr) && coresDiag(diags, summary, apiErr, 1) {
 		return
 	}
 	if errors.As(err, &apiErr) && (apiErr.Status == 402 || apiErr.Status == 403) {

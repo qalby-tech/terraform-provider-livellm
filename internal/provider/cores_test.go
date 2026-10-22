@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -404,6 +405,73 @@ func TestCoresRefusals(t *testing.T) {
 		apiDiag(&diags, "Cannot create VM", e)
 		if len(diags) != 1 || diags[0].Summary() != "Cannot create VM" {
 			t.Errorf("%v: %v", e, diags)
+		}
+	}
+}
+
+// A machine's write offers the cores that fit only when the machine runs on
+// that many: a desktop machine and Windows 11 need 2, so 1 that fits offers
+// only mixed speeds there, as the console and the CLI do. Any other answer
+// reads as apiDiag reads it.
+func TestCoresRefusalsMachineFloor(t *testing.T) {
+	vm := func(os string, desktop bool, edition types.String) vmResourceModel {
+		return vmResourceModel{OS: types.StringValue(os), Desktop: types.BoolValue(desktop), WindowsEdition: edition}
+	}
+	server, desk := vm("ubuntu", false, types.StringNull()), vm("ubuntu", true, types.StringNull())
+	for _, c := range []struct {
+		name  string
+		m     vmResourceModel
+		floor int
+	}{
+		{"ubuntu server", server, 1},
+		{"debian", vm("debian", false, types.StringNull()), 1},
+		{"ubuntu desktop", desk, 2},
+		{"windows, edition left out", vm("windows", false, types.StringNull()), 2},
+		{"windows, edition not known yet", vm("windows", false, types.StringUnknown()), 2},
+		{"windows 11", vm("windows", false, types.StringValue("desktop")), 2},
+		{"windows server", vm("windows", false, types.StringValue("server")), 1},
+	} {
+		if got := vmCoreFloor(c.m); got != c.floor {
+			t.Errorf("%s: floor %d, want %d", c.name, got, c.floor)
+		}
+	}
+	short := func(fit int) error {
+		return &client.APIError{Status: 409, Body: fmt.Sprintf(`{"error":"Only %d cores at 5.7 GHz are available. `+
+			`Continue with mixed core speeds?","code":"core_speed_short","workload":"ws","cores":4,"fit":%d,"speedMHz":5700}`, fit, fit)}
+	}
+	mixed := &client.APIError{Status: 409, Body: `{"error":"Mixed core speeds: this machine's cores run at different clock speeds.",` +
+		`"code":"core_speeds_mixed","workload":"ws","cores":4,"fit":1}`}
+	for _, c := range []struct {
+		name          string
+		m             vmResourceModel
+		err           error
+		summary       string
+		want, notWant []string
+	}{
+		{"desktop, 1 fits", desk, short(1), "Too few cores at that speed", []string{"mixed_speeds = true"}, []string{"Use 1 core", "cpus ="}},
+		{"desktop, mixed, 1 fits", desk, mixed, "Mixed core speeds", []string{"mixed_speeds = true"}, []string{"Use 1 core", "cpus ="}},
+		{"desktop, 2 fit", desk, short(2), "Too few cores at that speed", []string{"Use 2 cores: set cpus = 2.", "mixed_speeds = true"}, nil},
+		{"server, 1 fits", server, short(1), "Too few cores at that speed", []string{"Use 1 core: set cpus = 1.", "mixed_speeds = true"}, nil},
+		{"desktop, no room", desk, &client.APIError{Status: 409, Body: `{"error":"No server has room for this machine.","code":"server_full","workload":"ws"}`},
+			"No room on the servers", []string{"No server has room for this machine.", "fewer cores"}, nil},
+		{"desktop, the plan's pool", desk, &client.APIError{Status: 402, Body: `{"error":"the plan's pool is used up"}`},
+			"Workspace plan pool exceeded", []string{"the plan's pool is used up"}, nil},
+	} {
+		var diags diag.Diagnostics
+		vmAPIDiag(&diags, "Cannot create VM", c.err, c.m)
+		if len(diags) != 1 || diags[0].Summary() != c.summary {
+			t.Errorf("%s: %v", c.name, diags)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(diags[0].Detail(), w) {
+				t.Errorf("%s: detail %q lacks %q", c.name, diags[0].Detail(), w)
+			}
+		}
+		for _, w := range c.notWant {
+			if strings.Contains(diags[0].Detail(), w) {
+				t.Errorf("%s: detail %q has %q", c.name, diags[0].Detail(), w)
+			}
 		}
 	}
 }

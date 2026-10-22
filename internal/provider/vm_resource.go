@@ -755,7 +755,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	reach := reachOf(ctx, cfg.ReachableFrom)
 	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, plan.workloadType(), body); err != nil {
-		apiDiag(&resp.Diagnostics, "Cannot create VM", err)
+		vmAPIDiag(&resp.Diagnostics, "Cannot create VM", err, plan)
 		return
 	}
 	if plan.Stopped.ValueBool() {
@@ -875,7 +875,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		ReachableFrom: reach,
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
-		apiDiag(&resp.Diagnostics, "Cannot update VM", err)
+		vmAPIDiag(&resp.Diagnostics, "Cannot update VM", err, plan)
 		return
 	}
 	createTimeout, td := plan.Timeouts.Create(ctx, plan.defaultWait())

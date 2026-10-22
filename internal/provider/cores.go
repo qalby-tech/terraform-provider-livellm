@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -243,8 +244,10 @@ func coresWord(n int) string {
 }
 
 // coresDiag reports a cores refusal in its own words; false when err is not
-// one.
-func coresDiag(diags *diag.Diagnostics, summary string, apiErr *client.APIError) bool {
+// one. The cores that fit are offered only when there are at least floor of
+// them (the fewest the machine runs on, vmCoreFloor): fewer would be
+// refused, so only mixed speeds is offered then, as the console does.
+func coresDiag(diags *diag.Diagnostics, summary string, apiErr *client.APIError, floor int) bool {
 	if apiErr.Status != 409 && apiErr.Status != 422 {
 		return false
 	}
@@ -253,6 +256,34 @@ func coresDiag(diags *diag.Diagnostics, summary string, apiErr *client.APIError)
 		return false
 	}
 	fit, _ := apiErr.Count("fit")
+	if fit < floor {
+		fit = 0
+	}
 	diags.AddError(r.summary, fmt.Sprintf("%s: %s\n\n%s", summary, apiErr.Message(), r.next(fit)))
 	return true
+}
+
+// vmAPIDiag is apiDiag for a machine's write, whose cores refusals offer the
+// cores that fit only when the machine runs on that many.
+func vmAPIDiag(diags *diag.Diagnostics, summary string, err error, m vmResourceModel) {
+	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && coresDiag(diags, summary, apiErr, vmCoreFloor(m)) {
+		return
+	}
+	apiDiag(diags, summary, err)
+}
+
+// vmCoreFloor is the fewest cores a machine runs on, as the platform holds
+// them: a desktop machine and Windows 11 (the edition Windows gets when
+// windows_edition is left out) 2; a server and Windows Server 1.
+func vmCoreFloor(m vmResourceModel) int {
+	switch m.workloadType() {
+	case "vm-ubuntu-desktop":
+		return 2
+	case "vm-windows":
+		if m.WindowsEdition.ValueString() != "server" {
+			return 2
+		}
+	}
+	return 1
 }
