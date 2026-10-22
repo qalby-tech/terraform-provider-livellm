@@ -42,6 +42,14 @@ func (d *vmsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 						"phase": schema.StringAttribute{Computed: true, Description: "Lifecycle phase."},
 						"ssh":   schema.StringAttribute{Computed: true, Description: "host:port for SSH. Empty until assigned."},
 						"url":   schema.StringAttribute{Computed: true, Description: "First exposed HTTP port's URL, if any."},
+						"running_core_speed": schema.Int64Attribute{
+							Computed:    true,
+							Description: "Clock in MHz of the running VM's cores, when they are all of one speed; else null.",
+						},
+						"running_mixed_speeds": schema.BoolAttribute{
+							Computed:    true,
+							Description: "True when the running VM's cores run at different clock speeds; null when not running or no speeds are listed.",
+						},
 						"endpoints": schema.ListNestedAttribute{
 							Computed:    true,
 							Description: "Every exposed port (url for HTTP, addr for raw TCP/UDP).",
@@ -75,13 +83,15 @@ func (d *vmsDataSource) Configure(_ context.Context, req datasource.ConfigureReq
 }
 
 var vmObjAttrTypes = map[string]attr.Type{
-	"id":        types.StringType,
-	"type":      types.StringType,
-	"ready":     types.BoolType,
-	"phase":     types.StringType,
-	"ssh":       types.StringType,
-	"url":       types.StringType,
-	"endpoints": types.ListType{ElemType: types.ObjectType{AttrTypes: endpointAttrTypes}},
+	"id":                   types.StringType,
+	"type":                 types.StringType,
+	"ready":                types.BoolType,
+	"phase":                types.StringType,
+	"ssh":                  types.StringType,
+	"url":                  types.StringType,
+	"running_core_speed":   types.Int64Type,
+	"running_mixed_speeds": types.BoolType,
+	"endpoints":            types.ListType{ElemType: types.ObjectType{AttrTypes: endpointAttrTypes}},
 }
 
 type vmsModel struct {
@@ -108,14 +118,17 @@ func vmModelFrom(ctx context.Context, w client.WorkloadStatus) (vmModel, diag.Di
 	}
 	epList, d := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: endpointAttrTypes}, eps)
 	diags.Append(d...)
+	speed, mixed := runningCores(&w)
 	return vmModel{
-		ID:        types.StringValue(w.ID),
-		Type:      types.StringValue(w.Type),
-		Ready:     types.BoolValue(w.Ready),
-		Phase:     types.StringValue(w.Phase),
-		SSH:       types.StringValue(w.SSH),
-		URL:       types.StringValue(url),
-		Endpoints: epList,
+		ID:               types.StringValue(w.ID),
+		Type:             types.StringValue(w.Type),
+		Ready:            types.BoolValue(w.Ready),
+		Phase:            types.StringValue(w.Phase),
+		SSH:              types.StringValue(w.SSH),
+		URL:              types.StringValue(url),
+		RunningCoreSpeed: speed,
+		RunningMixed:     mixed,
+		Endpoints:        epList,
 	}, diags
 }
 

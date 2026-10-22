@@ -91,7 +91,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"cpus": schema.Int64Attribute{
 				Optional:      true,
 				Computed:      true,
-				Description:   "vCPU count. Left out, the platform's default for the kind of machine is read back.",
+				Description:   "How many cores (a core is one host thread). Left out, the platform's default for the kind of machine is read back.",
 				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
 			"memory_gi": schema.Int64Attribute{
@@ -106,6 +106,32 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 				Description: "Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out). " +
 					"Left out, the platform's default for the kind of machine is read back.",
 				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
+			},
+			"dedicated_cores": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Every core reserved for this machine on its server, instead of shared (the default), which may " +
+					"be slower when the server is busy. On servers whose cores run at different clock speeds, they are all " +
+					"of one speed (core_speed). Left out, the machine keeps what it has; false makes them shared. A change " +
+					"reaches a running machine at its next restart.",
+				PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
+			},
+			"core_speed": schema.Int64Attribute{
+				Optional: true,
+				Computed: true,
+				Description: "With dedicated_cores, where the servers' cores run at different clock speeds: the clock in MHz " +
+					"of the cores to get (5700 for 5.7 GHz), one of the servers' speeds. 0 (the default): any cores of one " +
+					"speed. Left out, the machine keeps what it has.",
+				Validators:    []validator.Int64{int64validator.AtLeast(0)},
+				PlanModifiers: []planmodifier.Int64{keepCoreChoice{}},
+			},
+			"mixed_speeds": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "With dedicated_cores: keep this many cores although no single clock speed has that many free, " +
+					"so they may run at different speeds (the console's Continue with mixed speeds). Left out, the machine " +
+					"keeps what it has; false asks for cores of one speed again.",
+				PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
 			},
 			"username": schema.StringAttribute{
 				Required: true,
@@ -164,6 +190,17 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the VM is up (false while stopped)."},
 			"ssh":   schema.StringAttribute{Computed: true, Description: "host:port to SSH into the VM, as reported by the platform."},
 			"url":   schema.StringAttribute{Computed: true, Description: "The first exposed HTTP port's public HTTPS URL."},
+			"running_core_speed": schema.Int64Attribute{
+				Computed: true,
+				Description: "The clock in MHz of the cores the running machine got, when they are all of one speed. Null " +
+					"while it isn't running, when they run at different speeds (running_mixed_speeds), and where the " +
+					"servers list no speeds.",
+			},
+			"running_mixed_speeds": schema.BoolAttribute{
+				Computed: true,
+				Description: "True when the running machine's cores run at different clock speeds, false when they are all " +
+					"of one speed (running_core_speed). Null while it isn't running and where the servers list no speeds.",
+			},
 			"endpoints": schema.ListNestedAttribute{
 				Computed:    true,
 				Description: "Every exposed port's public address.",
@@ -251,6 +288,9 @@ type vmResourceModel struct {
 	CPUs              types.Int64    `tfsdk:"cpus"`
 	MemoryGi          types.Int64    `tfsdk:"memory_gi"`
 	DiskGi            types.Int64    `tfsdk:"disk_gi"`
+	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
+	CoreSpeed         types.Int64    `tfsdk:"core_speed"`
+	MixedSpeeds       types.Bool     `tfsdk:"mixed_speeds"`
 	Username          types.String   `tfsdk:"username"`
 	PasswordWO        types.String   `tfsdk:"password_wo"`
 	PasswordWOVersion types.Int64    `tfsdk:"password_wo_version"`
@@ -267,6 +307,8 @@ type vmResourceModel struct {
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
 	ReachableFrom     types.List     `tfsdk:"reachable_from"`
 	Ready             types.Bool     `tfsdk:"ready"`
+	RunningCoreSpeed  types.Int64    `tfsdk:"running_core_speed"`
+	RunningMixed      types.Bool     `tfsdk:"running_mixed_speeds"`
 	SSH               types.String   `tfsdk:"ssh"`
 	URL               types.String   `tfsdk:"url"`
 	Endpoints         types.List     `tfsdk:"endpoints"`
@@ -288,6 +330,9 @@ func (r *vmResource) ValidateConfig(ctx context.Context, req resource.ValidateCo
 		resp.Diagnostics.AddAttributeError(path.Root("backup"), e[0], e[1])
 	}
 	for _, e := range windowsConfigErrors(cfg) {
+		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
+	}
+	for _, e := range sharedCoreErrors(cfg.DedicatedCores, cfg.MixedSpeeds, cfg.CoreSpeed) {
 		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
 	}
 	for _, e := range machineDatabaseErrors(cfg.Database, "machine") {
@@ -490,6 +535,7 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	if known(m.DiskGi) {
 		spec["storageSize"] = fmt.Sprintf("%dGi", m.DiskGi.ValueInt64())
 	}
+	vmCoresSpec(m, spec)
 	keys := configuredKeys(ctx, m.SSHKeys)
 	if wr.password != "" {
 		creds := map[string]any{
@@ -550,6 +596,7 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, m.Name.ValueString())
+	m.RunningCoreSpeed, m.RunningMixed = runningCores(st)
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.SSH = types.StringValue("")
@@ -580,8 +627,9 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 }
 
 // refreshVMSpec reads back what the platform decides: when the machine will
-// stop, and its keys when the configuration leaves them alone.
-func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
+// stop, and its keys when the configuration leaves them alone; it warns when
+// the platform didn't keep the machine's cores as written.
+func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, diags *diag.Diagnostics) {
 	var w *client.Workload
 	if ws, err := c.Workloads(ctx); err == nil {
 		w = findWorkload(ws, m.Name.ValueString())
@@ -592,6 +640,7 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
 			m.SSHKeys = types.ListValueMust(types.StringType, []attr.Value{})
 		}
 		settleVMSizes(m, nil)
+		settleVMCores(m, nil)
 		return
 	}
 	m.ExpiresAt = types.StringValue(w.ExpiresAt)
@@ -599,6 +648,8 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
 		m.SSHKeys = keyList(remoteKeys(w.VM))
 	}
 	settleVMSizes(m, w.VM)
+	settleVMCores(m, w.VM)
+	warnCoresNotKept(m.Name.ValueString(), *m, w.VM, diags)
 }
 
 // readVMSizes fills the machine's sizes from the platform's copy: the
@@ -659,12 +710,17 @@ func sameKeys(a, b []string) bool {
 	return true
 }
 
-// ModifyPlan refuses the one change the platform can't make, and keeps
-// expires_at quiet on an apply that doesn't move it.
+// ModifyPlan settles the cores against dedicated_cores, refuses the one
+// change the platform can't make, and keeps expires_at quiet on an apply that
+// doesn't move it.
 func (r *vmResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	warnReachReplace(ctx, r.data, req, resp)
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
-		return // create or destroy
+	if req.Plan.Raw.IsNull() {
+		return // destroy
+	}
+	planVMCores(ctx, req, resp)
+	if req.State.Raw.IsNull() || resp.Diagnostics.HasError() {
+		return // create
 	}
 	var plan, state vmResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -718,7 +774,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
-	refreshVMSpec(ctx, r.data.Client, &plan)
+	refreshVMSpec(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, plan.Name.ValueString(), "machine", plan.Database, vmBlock, &resp.Diagnostics)
@@ -772,6 +828,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		}
 	}
 	readVMSizes(&state, sp)
+	readVMCores(&state, sp)
 	if raw, ok := sp["allowCIDRs"].([]any); ok {
 		vals := make([]attr.Value, 0, len(raw))
 		for _, c := range raw {
@@ -829,7 +886,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready after update", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
-	refreshVMSpec(ctx, r.data.Client, &plan)
+	refreshVMSpec(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, w.ID, "machine", plan.Database, vmBlock, &resp.Diagnostics)

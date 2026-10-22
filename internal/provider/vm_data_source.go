@@ -45,6 +45,16 @@ func (d *vmDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, res
 			"phase": schema.StringAttribute{Computed: true, Description: "Lifecycle phase (Pending, Running, …)."},
 			"ssh":   schema.StringAttribute{Computed: true, Description: "host:port to SSH into the VM. Empty until assigned."},
 			"url":   schema.StringAttribute{Computed: true, Description: "The first exposed HTTP port's public HTTPS URL. Empty when no HTTP port is exposed."},
+			"running_core_speed": schema.Int64Attribute{
+				Computed: true,
+				Description: "The clock in MHz of the cores the running VM got, when they are all of one speed. Null while " +
+					"it isn't running, when they run at different speeds, and where the servers list no speeds.",
+			},
+			"running_mixed_speeds": schema.BoolAttribute{
+				Computed: true,
+				Description: "True when the running VM's cores run at different clock speeds. Null while it isn't running " +
+					"and where the servers list no speeds.",
+			},
 			"endpoints": schema.ListNestedAttribute{
 				Computed:    true,
 				Description: "Every exposed port. HTTP ports carry url; raw TCP/UDP ports carry addr (host:port) instead.",
@@ -75,13 +85,15 @@ func (d *vmDataSource) Configure(_ context.Context, req datasource.ConfigureRequ
 }
 
 type vmModel struct {
-	ID        types.String `tfsdk:"id"`
-	Type      types.String `tfsdk:"type"`
-	Ready     types.Bool   `tfsdk:"ready"`
-	Phase     types.String `tfsdk:"phase"`
-	SSH       types.String `tfsdk:"ssh"`
-	URL       types.String `tfsdk:"url"`
-	Endpoints types.List   `tfsdk:"endpoints"`
+	ID               types.String `tfsdk:"id"`
+	Type             types.String `tfsdk:"type"`
+	Ready            types.Bool   `tfsdk:"ready"`
+	Phase            types.String `tfsdk:"phase"`
+	SSH              types.String `tfsdk:"ssh"`
+	URL              types.String `tfsdk:"url"`
+	RunningCoreSpeed types.Int64  `tfsdk:"running_core_speed"`
+	RunningMixed     types.Bool   `tfsdk:"running_mixed_speeds"`
+	Endpoints        types.List   `tfsdk:"endpoints"`
 }
 
 type endpointModel struct {

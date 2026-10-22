@@ -85,6 +85,17 @@ func (e *APIError) Code() string {
 	return ""
 }
 
+// Count is a whole number the answer carries beside its error and code (a
+// cores refusal's "fit"), and whether it carries one.
+func (e *APIError) Count(key string) (int, bool) {
+	var b map[string]any
+	if json.Unmarshal([]byte(e.Body), &b) != nil {
+		return 0, false
+	}
+	f, ok := b[key].(float64)
+	return int(f), ok
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
@@ -162,6 +173,18 @@ type WorkloadStatus struct {
 	// Servers: an object storage of 3 servers, how many it runs and how many
 	// are ready (absent for anything else).
 	Servers *ServerCount `json:"servers,omitempty"`
+	// Cores: a running machine, the clock of the cores it got (absent where
+	// the servers list no speeds, and from a platform without dedicated
+	// cores).
+	Cores *CoreStatus `json:"cores,omitempty"`
+}
+
+// CoreStatus is the clock of a running machine's cores: SpeedMHz when they
+// are all of one speed, else Mixed, with the platform's words.
+type CoreStatus struct {
+	SpeedMHz int    `json:"speedMHz,omitempty"`
+	Mixed    bool   `json:"mixed,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 // ServerCount is an object storage cluster's servers: desired and ready.

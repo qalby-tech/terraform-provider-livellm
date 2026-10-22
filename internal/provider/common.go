@@ -17,7 +17,10 @@ import (
 )
 
 // apiDiag turns a client error into an actionable diagnostic. These cases
-// have dedicated wording: a billing refusal the API names by its code
+// have dedicated wording: a machine's cores or room refused by its code
+// (coresRefusals: too few cores at the speed asked for, no single speed with
+// the cores, a speed no server has, no server with room); a billing refusal
+// the API names by its code
 // (billingRefusals: pay as you go off, past its limit, a card missing, a
 // payment overdue, pay as you go not open to the account); any other 402, the
 // workspace plan's resource pool is exhausted (the fix is a plan change, not a
@@ -29,6 +32,9 @@ import (
 // where it comes from.
 func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && coresDiag(diags, summary, apiErr) {
+		return
+	}
 	if errors.As(err, &apiErr) && (apiErr.Status == 402 || apiErr.Status == 403) {
 		if b, ok := billingRefusals[apiErr.Code()]; ok {
 			diags.AddError(b.summary, fmt.Sprintf("%s: %s\n\n%s", summary, apiErr.Message(), b.next))
