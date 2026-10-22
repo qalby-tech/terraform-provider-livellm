@@ -304,9 +304,9 @@ func TestCoresRefusals(t *testing.T) {
 			"No cores at that speed",
 			[]string{"No server this machine may run on has cores at 3 GHz.", "core_speed", "0 for any cores of one speed"}, []string{"cpus ="}},
 		{409, `{"error":"This server is full: it has no room for this machine.","code":"server_full","workload":"ws"}`,
-			"No room for this machine", []string{"This server is full: it has no room for this machine.", "fewer cores"}, nil},
+			"No room on the servers", []string{"This server is full: it has no room for this machine.", "fewer cores"}, nil},
 		{409, `{"error":"No server has room for this machine.","code":"server_full","workload":"ws"}`,
-			"No room for this machine", []string{"No server has room for this machine."}, nil},
+			"No room on the servers", []string{"No server has room for this machine."}, nil},
 	} {
 		var diags diag.Diagnostics
 		apiDiag(&diags, "Cannot create VM", &client.APIError{Status: c.status, Body: c.body})
@@ -326,6 +326,25 @@ func TestCoresRefusals(t *testing.T) {
 		}
 		if strings.Contains(strings.ToLower(diags[0].Detail()), "vcpu") {
 			t.Errorf("the product says cores: %q", diags[0].Detail())
+		}
+	}
+	// Every kind is held to the servers' room, not only machines: the
+	// platform's words name the kind, the provider's never say machine.
+	for _, c := range []struct{ summary, body string }{
+		{"Cannot create app", `{"error":"No server has room for this app.","code":"server_full","workload":"web"}`},
+		{"Cannot create database", `{"error":"This server is full: it has no room for this database.","code":"server_full","workload":"db"}`},
+	} {
+		var diags diag.Diagnostics
+		apiDiag(&diags, c.summary, &client.APIError{Status: 409, Body: c.body})
+		if len(diags) != 1 || diags[0].Summary() != "No room on the servers" {
+			t.Errorf("%s: %v", c.body, diags)
+			continue
+		}
+		var b struct{ Error string }
+		_ = json.Unmarshal([]byte(c.body), &b)
+		if d := diags[0].Detail(); !strings.HasPrefix(d, c.summary+": "+b.Error) ||
+			strings.Contains(strings.TrimPrefix(d, c.summary+": "+b.Error), "machine") {
+			t.Errorf("%s: detail %q", c.summary, d)
 		}
 	}
 	// Another conflict, or a code on another status, is shown as it was.

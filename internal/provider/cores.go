@@ -200,11 +200,13 @@ func runningCores(st *client.WorkloadStatus) (speed types.Int64, mixed types.Boo
 	return types.Int64Value(int64(st.Cores.SpeedMHz)), types.BoolValue(false)
 }
 
-// coresRefusals are the platform's answers when a machine's cores or room
-// can't be had, by its code (409, or 422 for core_speed_unknown): what the
-// diagnostic is called and what to write instead. The platform's own words
-// come first in the detail; the console's buttons ("Use N cores", "Continue
-// with mixed speeds") are what to write in the configuration.
+// coresRefusals are the platform's answers when a machine's cores, or room
+// for any resource, can't be had, by its code (409, or 422 for
+// core_speed_unknown): what the diagnostic is called and what to write
+// instead. The platform's own words come first in the detail (server_full
+// names the kind: "No server has room for this app."); the console's buttons
+// ("Use N cores", "Continue with mixed speeds") are what to write in the
+// configuration.
 var coresRefusals = map[string]struct {
 	summary string
 	next    func(fit int) string
@@ -214,8 +216,8 @@ var coresRefusals = map[string]struct {
 	"core_speed_unknown": {"No cores at that speed", func(int) string {
 		return "Set core_speed to a speed the servers have, or to 0 for any cores of one speed."
 	}},
-	"server_full": {"No room for this machine", func(int) string {
-		return "Stop or shrink another machine, or give this one fewer cores or less memory, then apply again."
+	"server_full": {"No room on the servers", func(int) string {
+		return "Stop or shrink another resource, or give this one fewer cores or less memory, then apply again."
 	}},
 }
 

@@ -17,9 +17,10 @@ import (
 )
 
 // apiDiag turns a client error into an actionable diagnostic. These cases
-// have dedicated wording: a machine's cores or room refused by its code
-// (coresRefusals: too few cores at the speed asked for, no single speed with
-// the cores, a speed no server has, no server with room); a billing refusal
+// have dedicated wording: a machine's cores, or any resource's room, refused
+// by its code (coresRefusals: too few cores at the speed asked for, no single
+// speed with the cores, a speed no server has, no server with room); a
+// billing refusal
 // the API names by its code
 // (billingRefusals: pay as you go off, past its limit, a card missing, a
 // payment overdue, pay as you go not open to the account); any other 402, the

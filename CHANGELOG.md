@@ -23,8 +23,10 @@
   that fit, or `mixed_speeds = true`; a speed no server has ("No server this
   machine may run on has cores at 3 GHz."): another `core_speed`, or `0`; no
   room ("This server is full: it has no room for this machine." / "No server
-  has room for this machine.", any machine that is new, started, grown or
-  moved): stop or shrink another machine, or ask for less.
+  has room for this machine.", the platform naming the kind: any resource,
+  machine, app, database, object storage, browser, Browser API or Desktop
+  App, that is new, started, grown or moved): stop or shrink another
+  resource, or ask for less.
 - `running_core_speed` and `running_mixed_speeds` (computed, on `livellm_vm`
   and on the `livellm_vm` and `livellm_vms` data sources): the clock in MHz of
   the running machine's cores when they are all of one speed, or that they
