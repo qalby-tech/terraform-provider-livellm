@@ -231,7 +231,15 @@ func useCoresOrMixed(fit int) string {
 	if fit <= 0 {
 		return mixed
 	}
-	return fmt.Sprintf("Use %d cores: set cpus = %d. %s", fit, fit, mixed)
+	return fmt.Sprintf("Use %s: set cpus = %d. %s", coresWord(fit), fit, mixed)
+}
+
+// coresWord is a count of cores as the console words it: "1 core", "6 cores".
+func coresWord(n int) string {
+	if n == 1 {
+		return "1 core"
+	}
+	return fmt.Sprintf("%d cores", n)
 }
 
 // coresDiag reports a cores refusal in its own words; false when err is not
