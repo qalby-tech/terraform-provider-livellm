@@ -113,5 +113,7 @@ provider_installation {
   direct {}
 }
 EOF
+# The example's machine has a password; set it, or plan asks for it:
+export TF_VAR_machine_password="…"
 go build -o terraform-provider-livellm && cd examples/basic && terraform plan
 ```
