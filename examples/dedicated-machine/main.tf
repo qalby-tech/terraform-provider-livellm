@@ -7,6 +7,15 @@ terraform {
 # export LIVELLM_API_KEY=llc_…
 provider "livellm" {}
 
+# The servers' clock speeds, fastest first, each with the most cores of it a
+# new machine can get on one server: empty where every server runs at one
+# speed. Each speed is a value core_speed takes.
+data "livellm_machine_cores" "this" {}
+
+output "core_speeds" {
+  value = data.livellm_machine_cores.this.speeds
+}
+
 # A machine with dedicated cores: every core reserved for it on its server,
 # instead of shared (the default). Where the servers' cores run at different
 # clock speeds they are all of one speed: core_speed (MHz) would ask for one,

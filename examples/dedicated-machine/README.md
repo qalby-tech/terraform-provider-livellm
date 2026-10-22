@@ -1,7 +1,9 @@
 # A machine with dedicated cores
 
-Creates one machine, `build-box`, with 2 dedicated cores and 4 GiB of
-memory, and prints the clock of the cores it got once it runs.
+Lists the servers' core speeds with the cores of each a new machine can get
+(`livellm_machine_cores`), creates one machine, `build-box`, with 2 dedicated
+cores and 4 GiB of memory, and prints the clock of the cores it got once it
+runs.
 
 ```sh
 export LIVELLM_API_KEY=llc_…
