@@ -94,10 +94,12 @@ OpenTofu 1.11+.
 
 ## Examples
 
-- [`examples/basic`](examples/basic) — provider setup, the
-  `livellm_workspace` data source and a machine with dedicated cores. Full
-  per-resource examples live in the
+- [`examples/basic`](examples/basic) — provider setup plus the
+  `livellm_workspace` data source. Full per-resource examples live in the
   [registry documentation](https://registry.terraform.io/providers/qalby-tech/livellm/latest/docs).
+- [`examples/dedicated-machine`](examples/dedicated-machine) — a machine with
+  dedicated cores and the clock of the cores it got; applying it creates the
+  machine.
 
 ## Developing the provider
 
