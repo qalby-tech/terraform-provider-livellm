@@ -328,6 +328,7 @@ shrink another resource, or give this one fewer cores or less memory.
   - `password` (String, Required, Sensitive) Registry password or access token. Stored write-only by the platform; sent from configuration on every apply.
 - `command` (List of String) Entrypoint override.
 - `cpu` (String) CPU request, e.g. `500m`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
+- `dedicated_cores` (Boolean) All of `cpu` reserved on its server, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. Per copy. Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
 - `memory` (String) Memory request, e.g. `512Mi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
 - `env` (Map of String) Plain environment variables.
 - `secret_env` (Map of String, Sensitive) Environment variables with secret

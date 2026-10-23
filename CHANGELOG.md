@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Shared or dedicated cores on apps, Desktop Apps, databases, browsers and
+  Browser APIs.** `livellm_container_app`, `livellm_desktop_app`,
+  `livellm_storage` (Postgres and Redis), `livellm_browser` and
+  `livellm_browser_api` take `dedicated_cores = true`: all of `cpu` reserved
+  on the server. Shared cores, the default, reserve a quarter of `cpu` and may
+  still use all of it. Optional and computed like the machine's: left out, a
+  resource keeps what it has; `false` makes them shared. An object storage
+  has none: `dedicated_cores = true` with `engine = "s3"` is an error at plan
+  time.
 - **Dedicated cores.** `livellm_vm` takes `dedicated_cores = true`: every
   core reserved for the machine on its server, instead of shared (the
   default), which may be slower when the server is busy. On servers whose

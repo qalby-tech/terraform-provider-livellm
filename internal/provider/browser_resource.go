@@ -136,6 +136,7 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description:   "CPU request, e.g. \"1\". Left out, the platform's default for the engine is read back.",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
+			"dedicated_cores": dedicatedCoresAttribute(""),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -333,6 +334,7 @@ type browserModel struct {
 	Name              types.String   `tfsdk:"name"`
 	Engine            types.String   `tfsdk:"engine"`
 	CPU               types.String   `tfsdk:"cpu"`
+	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
 	Memory            types.String   `tfsdk:"memory"`
 	Locale            types.String   `tfsdk:"locale"`
 	Timezone          types.String   `tfsdk:"timezone"`
@@ -492,6 +494,7 @@ func browserSpec(ctx context.Context, plan, cfg browserModel, state *browserMode
 	if v := plan.CPU.ValueString(); v != "" {
 		spec["cpu"] = v
 	}
+	dedicatedSpec(plan.DedicatedCores, spec)
 	if v := plan.Memory.ValueString(); v != "" {
 		spec["memory"] = v
 	}
@@ -903,6 +906,7 @@ func readBrowser(ctx context.Context, prev browserModel, sp map[string]any, all 
 	m := prev
 	m.Engine = readEngine(sp["engine"])
 	m.CPU, m.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
+	m.DedicatedCores = readDedicated(sp)
 	if all || known(prev.Locale) {
 		m.Locale = readSetting(sp["locale"])
 	}
@@ -1091,6 +1095,7 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 				m.Languages = read.Languages
 			}
 			m.CPU = settleString(plan.CPU, w.Browser["cpu"])
+			m.DedicatedCores = settleDedicated(plan.DedicatedCores, w.Browser)
 			m.Memory = settleString(plan.Memory, w.Browser["memory"])
 			if b, ok := w.Browser["profilesReady"].(bool); ok {
 				fromSpec = &b
@@ -1104,6 +1109,7 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 		m.Languages = types.ListNull(types.StringType)
 	}
 	m.CPU, m.Memory = settleString(m.CPU, nil), settleString(m.Memory, nil)
+	m.DedicatedCores = settleDedicated(m.DedicatedCores, nil)
 	m.Proxy = withoutSecrets(ctx, m.Proxy)
 	return m
 }

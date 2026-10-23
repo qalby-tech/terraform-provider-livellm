@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -286,4 +287,43 @@ func vmCoreFloor(m vmResourceModel) int {
 		}
 	}
 	return 1
+}
+
+// dedicatedCoresAttribute is dedicated_cores on an app, a Desktop App, a
+// database, a browser and a Browser API: all of cpu reserved on its server
+// instead of shared cores (the default), a quarter of it reserved. Left out,
+// the resource keeps what it has (false on a new one); false makes them
+// shared.
+func dedicatedCoresAttribute(extra string) schema.BoolAttribute {
+	return schema.BoolAttribute{
+		Optional: true,
+		Computed: true,
+		Description: "All of cpu reserved on its server, instead of shared cores (the default): a quarter of cpu " +
+			"reserved, all of it usable, and slower when the server is busy." + extra + " Left out, it keeps what it has; " +
+			"false makes them shared.",
+		PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
+	}
+}
+
+// readDedicated is a resource's dedicated_cores from the platform's copy of
+// its settings block (absent: shared).
+func readDedicated(block map[string]any) types.Bool {
+	return types.BoolValue(block["dedicatedCores"] == true)
+}
+
+// dedicatedSpec adds dedicated_cores to a write's settings block when known,
+// false included (that is how it is cleared).
+func dedicatedSpec(v types.Bool, block map[string]any) {
+	if known(v) {
+		block["dedicatedCores"] = v.ValueBool()
+	}
+}
+
+// settleDedicated resolves a dedicated_cores a write left unknown from the
+// resource's settings block (nil when unread: shared).
+func settleDedicated(v types.Bool, block map[string]any) types.Bool {
+	if v.IsUnknown() {
+		return readDedicated(block)
+	}
+	return v
 }

@@ -73,6 +73,7 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Description:   "CPU request, e.g. \"500m\". Left out, the platform's default is read back.",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
+			"dedicated_cores": dedicatedCoresAttribute(""),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -156,6 +157,7 @@ type browserAPIModel struct {
 	RemoteBrowser     types.List     `tfsdk:"remote_browser"`
 	RemoteAuthVersion types.Int64    `tfsdk:"remote_auth_version"`
 	CPU               types.String   `tfsdk:"cpu"`
+	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
 	Memory            types.String   `tfsdk:"memory"`
 	Ready             types.Bool     `tfsdk:"ready"`
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
@@ -218,6 +220,7 @@ func browserAPISpec(ctx context.Context, m browserAPIModel, auth map[string]stri
 	if v := m.CPU.ValueString(); v != "" {
 		spec["cpu"] = v
 	}
+	dedicatedSpec(m.DedicatedCores, spec)
 	if v := m.Memory.ValueString(); v != "" {
 		spec["memory"] = v
 	}
@@ -340,6 +343,7 @@ func readBrowserAPI(prev browserAPIModel, sp map[string]any) browserAPIModel {
 		m.RemoteBrowser = types.ListValueMust(objType, vals)
 	}
 	m.CPU, m.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
+	m.DedicatedCores = readDedicated(sp)
 	refreshPlacement(sp, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	return m
 }
@@ -445,6 +449,7 @@ func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIMo
 		sp = w.Controller
 	}
 	m.CPU, m.Memory = settleString(m.CPU, sp["cpu"]), settleString(m.Memory, sp["memory"])
+	m.DedicatedCores = settleDedicated(m.DedicatedCores, sp)
 }
 
 func (r *browserAPIResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
