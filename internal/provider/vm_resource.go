@@ -23,7 +23,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
@@ -142,7 +141,6 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 					"livellm_machine_devices data source lists them). Each is passed through to the machine, which then " +
 					"stays on the server that has it; a device is one machine's at a time. A change reaches a running " +
 					"machine at its next restart. Left out, the machine keeps what it has; [] removes them.",
-				Validators:    []validator.List{listvalidator.SizeAtMost(maxMachineDevices), listvalidator.UniqueValues()},
 				PlanModifiers: []planmodifier.List{keepWhenLeftOut{}},
 			},
 			"time_zone": schema.StringAttribute{
