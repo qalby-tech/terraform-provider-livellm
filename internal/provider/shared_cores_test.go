@@ -202,3 +202,56 @@ func TestBrowserReadsCPUModel(t *testing.T) {
 		}
 	}
 }
+
+// The VM data sources read running_cpu_model through their own Read: the
+// list's object type and the model agree, and a shared machine has the
+// model and no clock.
+func TestVMDataSourcesReadCPUModel(t *testing.T) {
+	ctx := context.Background()
+	const i9 = "Intel Core i9-14900K"
+	c := coresPlatform(t, client.Workload{ID: "box", Type: "vm-ubuntu"},
+		`{"id":"box","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"model":"`+i9+`"}},`+
+			`{"id":"fast","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"speedMHz":5700,"model":"`+i9+`"}}`)
+
+	vms := NewVMsDataSource()
+	vms.(datasource.DataSourceWithConfigure).Configure(ctx, datasource.ConfigureRequest{ProviderData: &providerData{Client: c}}, &datasource.ConfigureResponse{})
+	var sr datasource.SchemaResponse
+	vms.Schema(ctx, datasource.SchemaRequest{}, &sr)
+	resp := datasource.ReadResponse{State: tfsdk.State{Schema: sr.Schema, Raw: tftypes.NewValue(sr.Schema.Type().TerraformType(ctx), nil)}}
+	vms.Read(ctx, datasource.ReadRequest{}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("vms: %v", resp.Diagnostics)
+	}
+	var list vmsModel
+	resp.State.Get(ctx, &list)
+	var rows []vmModel
+	if d := list.VMs.ElementsAs(ctx, &rows, false); d.HasError() || len(rows) != 2 {
+		t.Fatalf("vms rows: %v %v", rows, d)
+	}
+	for _, m := range rows {
+		if !m.RunningCPUModel.Equal(types.StringValue(i9)) {
+			t.Errorf("%s: model %v", m.ID, m.RunningCPUModel)
+		}
+	}
+	if rows[0].ID.ValueString() != "box" || !rows[0].RunningCoreSpeed.IsNull() || !rows[0].RunningMixed.IsNull() ||
+		!rows[1].RunningCoreSpeed.Equal(types.Int64Value(5700)) {
+		t.Errorf("clocks: %+v", rows)
+	}
+
+	vm := NewVMDataSource()
+	vm.(datasource.DataSourceWithConfigure).Configure(ctx, datasource.ConfigureRequest{ProviderData: &providerData{Client: c}}, &datasource.ConfigureResponse{})
+	vm.Schema(ctx, datasource.SchemaRequest{}, &sr)
+	st := tfsdk.State{Schema: sr.Schema, Raw: tftypes.NewValue(sr.Schema.Type().TerraformType(ctx), nil)}
+	st.SetAttribute(ctx, path.Root("id"), "box")
+	cfg := tfsdk.Config{Schema: sr.Schema, Raw: st.Raw}
+	one := datasource.ReadResponse{State: tfsdk.State{Schema: sr.Schema, Raw: tftypes.NewValue(sr.Schema.Type().TerraformType(ctx), nil)}}
+	vm.Read(ctx, datasource.ReadRequest{Config: cfg}, &one)
+	if one.Diagnostics.HasError() {
+		t.Fatalf("vm: %v", one.Diagnostics)
+	}
+	var m vmModel
+	one.State.Get(ctx, &m)
+	if !m.RunningCPUModel.Equal(types.StringValue(i9)) || !m.RunningCoreSpeed.IsNull() {
+		t.Errorf("vm: %v %v", m.RunningCPUModel, m.RunningCoreSpeed)
+	}
+}
