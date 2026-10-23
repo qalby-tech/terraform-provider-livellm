@@ -18,8 +18,8 @@
 - **Cores and room refused in the platform's words.** A create or an update
   the platform refuses says what it said and what to write: too few cores at
   the speed asked for ("Only 6 cores at 5.7 GHz are available. Continue with
-  mixed core speeds?") or no single speed with the cores ("Mixed core speeds:
-  this machine's cores run at different clock speeds."): `cpus` = the most
+  mixed core speeds?") or no server with the cores of one speed ("No server has 20
+  free cores of one speed. Continue with cores of mixed speeds?"): `cpus` = the most
   that fit, or `mixed_speeds = true`; a speed no server has ("No server this
   machine may run on has cores at 3 GHz."): another `core_speed`, or `0`; no
   room ("This server is full: it has no room for this machine." / "No server

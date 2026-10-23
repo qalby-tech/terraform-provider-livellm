@@ -217,7 +217,7 @@ var coresRefusals = map[string]struct {
 	next    func(fit int) string
 }{
 	"core_speed_short":  {"Too few cores at that speed", useCoresOrMixed},
-	"core_speeds_mixed": {"Mixed core speeds", useCoresOrMixed},
+	"core_speeds_mixed": {"Too few cores of one speed", useCoresOrMixed},
 	"core_speed_unknown": {"No cores at that speed", func(int) string {
 		return "Set core_speed to a speed the servers have, or to 0 for any cores of one speed."
 	}},

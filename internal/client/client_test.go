@@ -70,7 +70,7 @@ func TestStatusCores(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"workloads":[
 			{"id":"fast","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"speedMHz":5700}},
-			{"id":"mixed","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"mixed":true,"message":"Mixed core speeds: this machine's cores run at different clock speeds."}},
+			{"id":"mixed","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"mixed":true,"message":"Mixed core speeds"}},
 			{"id":"old","type":"vm-ubuntu","phase":"Running","ready":true}]}`))
 	}))
 	defer srv.Close()
@@ -82,7 +82,7 @@ func TestStatusCores(t *testing.T) {
 		t.Errorf("fast: %+v", c)
 	}
 	if c := st.Workloads[1].Cores; c == nil || !c.Mixed || c.SpeedMHz != 0 ||
-		c.Message != "Mixed core speeds: this machine's cores run at different clock speeds." {
+		c.Message != "Mixed core speeds" {
 		t.Errorf("mixed: %+v", c)
 	}
 	if c := st.Workloads[2].Cores; c != nil {

@@ -340,9 +340,9 @@ func TestCoresRefusals(t *testing.T) {
 			"Too few cores at that speed",
 			[]string{"Cannot create VM: Only 6 cores at 5.7 GHz are available. Continue with mixed core speeds?",
 				"Use 6 cores: set cpus = 6.", "Continue with mixed speeds: set mixed_speeds = true"}, nil},
-		{409, `{"error":"Mixed core speeds: this machine's cores run at different clock speeds.","code":"core_speeds_mixed","workload":"ws","cores":20,"fit":16}`,
-			"Mixed core speeds",
-			[]string{"Mixed core speeds: this machine's cores run at different clock speeds.", "Use 16 cores: set cpus = 16.",
+		{409, `{"error":"No server has 20 free cores of one speed. Continue with cores of mixed speeds?","code":"core_speeds_mixed","workload":"ws","cores":20,"fit":16}`,
+			"Too few cores of one speed",
+			[]string{"No server has 20 free cores of one speed. Continue with cores of mixed speeds?", "Use 16 cores: set cpus = 16.",
 				"mixed_speeds = true"}, nil},
 		{409, `{"error":"Only 1 core at 5.7 GHz is available. Continue with mixed core speeds?","code":"core_speed_short","workload":"ws","cores":4,"fit":1,"speedMHz":5700}`,
 			"Too few cores at that speed",
@@ -439,7 +439,7 @@ func TestCoresRefusalsMachineFloor(t *testing.T) {
 		return &client.APIError{Status: 409, Body: fmt.Sprintf(`{"error":"Only %d cores at 5.7 GHz are available. `+
 			`Continue with mixed core speeds?","code":"core_speed_short","workload":"ws","cores":4,"fit":%d,"speedMHz":5700}`, fit, fit)}
 	}
-	mixed := &client.APIError{Status: 409, Body: `{"error":"Mixed core speeds: this machine's cores run at different clock speeds.",` +
+	mixed := &client.APIError{Status: 409, Body: `{"error":"No server has 4 free cores of one speed. Continue with cores of mixed speeds?",` +
 		`"code":"core_speeds_mixed","workload":"ws","cores":4,"fit":1}`}
 	for _, c := range []struct {
 		name          string
@@ -449,7 +449,7 @@ func TestCoresRefusalsMachineFloor(t *testing.T) {
 		want, notWant []string
 	}{
 		{"desktop, 1 fits", desk, short(1), "Too few cores at that speed", []string{"mixed_speeds = true"}, []string{"Use 1 core", "cpus ="}},
-		{"desktop, mixed, 1 fits", desk, mixed, "Mixed core speeds", []string{"mixed_speeds = true"}, []string{"Use 1 core", "cpus ="}},
+		{"desktop, mixed, 1 fits", desk, mixed, "Too few cores of one speed", []string{"mixed_speeds = true"}, []string{"Use 1 core", "cpus ="}},
 		{"desktop, 2 fit", desk, short(2), "Too few cores at that speed", []string{"Use 2 cores: set cpus = 2.", "mixed_speeds = true"}, nil},
 		{"server, 1 fits", server, short(1), "Too few cores at that speed", []string{"Use 1 core: set cpus = 1.", "mixed_speeds = true"}, nil},
 		{"desktop, no room", desk, &client.APIError{Status: 409, Body: `{"error":"No server has room for this machine.","code":"server_full","workload":"ws"}`},
@@ -487,7 +487,7 @@ func TestRunningCores(t *testing.T) {
 		{nil, types.Int64Null(), types.BoolNull()},
 		{&client.WorkloadStatus{}, types.Int64Null(), types.BoolNull()},
 		{&client.WorkloadStatus{Cores: &client.CoreStatus{SpeedMHz: 5700}}, types.Int64Value(5700), types.BoolValue(false)},
-		{&client.WorkloadStatus{Cores: &client.CoreStatus{Mixed: true, Message: "Mixed core speeds: …"}}, types.Int64Null(), types.BoolValue(true)},
+		{&client.WorkloadStatus{Cores: &client.CoreStatus{Mixed: true, Message: "Mixed core speeds"}}, types.Int64Null(), types.BoolValue(true)},
 	} {
 		speed, mixed := runningCores(c.st)
 		if !speed.Equal(c.speed) || !mixed.Equal(c.mixed) {

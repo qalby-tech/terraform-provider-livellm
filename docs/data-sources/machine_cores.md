@@ -41,9 +41,9 @@ machines hold are not free), no more than the server has room for. Memory
 isn't counted: it is judged when the machine is saved. A machine with more
 cores than its speed's `fit` is refused ("Only 6 cores at 5.7 GHz are
 available. Continue with mixed core speeds?"), and one with `core_speed` left
-out and more cores than `dedicated_fit` is refused as mixed core speeds
-("Mixed core speeds: this machine's cores run at different clock speeds."),
-unless `mixed_speeds = true` (see [`livellm_vm`](../resources/vm.md)). Where
+out and more cores than `dedicated_fit` is refused ("No server has 20 free
+cores of one speed. Continue with cores of mixed speeds?", naming the cores
+asked), unless `mixed_speeds = true` (see [`livellm_vm`](../resources/vm.md)). Where
 the servers run at one speed (`show_speed` is `false`), or no server has room
 for that many cores at all, the refusal is "No server has room for this
 machine." instead, and `mixed_speeds` doesn't change it.

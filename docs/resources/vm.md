@@ -201,7 +201,7 @@ what to write instead:
 | The platform says | What to write |
 |---|---|
 | "Only 6 cores at 5.7 GHz are available. Continue with mixed core speeds?" | `cpus = 6`, or `mixed_speeds = true` |
-| "Mixed core speeds: this machine's cores run at different clock speeds." | `cpus` = the most of one speed that fit (the error names it), or `mixed_speeds = true` |
+| "No server has 20 free cores of one speed. Continue with cores of mixed speeds?" | `cpus` = the most of one speed that fit (the error names it), or `mixed_speeds = true` |
 | "No server this machine may run on has cores at 3 GHz." | a `core_speed` the servers have, or `0` for any one speed |
 
 `mixed_speeds = true` keeps the count with cores that may run at different
@@ -265,7 +265,7 @@ fewer cores or less memory.
 - `url` (String) The first exposed HTTP port's public HTTPS URL.
 - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`).
 - `running_core_speed` (Number) The clock in MHz of the cores the running machine got, when they are all of one speed. Null while it isn't running, when they run at different speeds, and where the servers list no speeds.
-- `running_mixed_speeds` (Boolean) `true` when the running machine's cores run at different clock speeds (the console's "Mixed core speeds: this machine's cores run at different clock speeds."), `false` when they are all of one speed. Null while it isn't running and where the servers list no speeds.
+- `running_mixed_speeds` (Boolean) `true` when the running machine's cores run at different clock speeds (the console's "Mixed core speeds"), `false` when they are all of one speed. Null while it isn't running and where the servers list no speeds.
 
 ## Import
 
