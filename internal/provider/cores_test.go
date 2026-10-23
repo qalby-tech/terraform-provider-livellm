@@ -579,7 +579,7 @@ func TestWarnCoresNotKept(t *testing.T) {
 		m := c.plan
 		cl := coresPlatform(t, client.Workload{ID: "box", Type: "vm-ubuntu", VM: c.vm}, `{"id":"box","type":"vm-ubuntu","ready":true}`)
 		var diags diag.Diagnostics
-		refreshVMSpec(ctx, cl, &m, &diags)
+		refreshVMSpec(ctx, cl, &m, vmWrite{}, &diags)
 		warns := c.names != ""
 		if got := len(diags.Warnings()) == 1 && diags.Warnings()[0].Summary() == "Cores not kept as written"; got != warns {
 			t.Errorf("%s: %v, want warned %v", c.name, diags, warns)

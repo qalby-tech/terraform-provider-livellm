@@ -23,6 +23,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
@@ -133,6 +134,27 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 					"keeps what it has; false asks for cores of one speed again.",
 				PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
 			},
+			"devices": schema.ListAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "The cluster's devices this machine has, by id: a GPU, a USB controller (the " +
+					"livellm_machine_devices data source lists them). Each is passed through to the machine, which then " +
+					"stays on the server that has it; a device is one machine's at a time. A change reaches a running " +
+					"machine at its next restart. Left out, the machine keeps what it has; [] removes them.",
+				Validators:    []validator.List{listvalidator.SizeAtMost(maxMachineDevices), listvalidator.UniqueValues()},
+				PlanModifiers: []planmodifier.List{keepWhenLeftOut{}},
+			},
+			"time_zone": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "The machine's time zone when it is made, an IANA name such as \"Europe/Moscow\". Left out: " +
+					"the cluster's zone, else UTC. It is set at the first start; after that change it on the machine " +
+					"itself: another value on an existing machine is refused at plan time.",
+				Validators:    []validator.String{stringvalidator.RegexMatches(timezoneRe, "must be a time zone name such as Europe/Moscow or UTC")},
+				PlanModifiers: []planmodifier.String{keepWhenLeftOut{}},
+			},
+			"port_groups": portGroupsAttribute(),
 			"username": schema.StringAttribute{
 				Required: true,
 				Description: "The login's username, for SSH too; on Windows it is an administrator and can't be \"Administrator\". " +
@@ -291,6 +313,9 @@ type vmResourceModel struct {
 	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
 	CoreSpeed         types.Int64    `tfsdk:"core_speed"`
 	MixedSpeeds       types.Bool     `tfsdk:"mixed_speeds"`
+	Devices           types.List     `tfsdk:"devices"`
+	TimeZone          types.String   `tfsdk:"time_zone"`
+	PortGroups        types.List     `tfsdk:"port_groups"`
 	Username          types.String   `tfsdk:"username"`
 	PasswordWO        types.String   `tfsdk:"password_wo"`
 	PasswordWOVersion types.Int64    `tfsdk:"password_wo_version"`
@@ -337,6 +362,12 @@ func (r *vmResource) ValidateConfig(ctx context.Context, req resource.ValidateCo
 	}
 	for _, e := range machineDatabaseErrors(cfg.Database, "machine") {
 		resp.Diagnostics.AddAttributeError(path.Root("database"), e[0], e[1])
+	}
+	for _, e := range vmDeviceErrors(cfg.Devices) {
+		resp.Diagnostics.AddAttributeError(path.Root("devices"), e[0], e[1])
+	}
+	for _, e := range portGroupErrors(ctx, cfg.PortGroups) {
+		resp.Diagnostics.AddAttributeError(path.Root("port_groups"), e[0], e[1])
 	}
 }
 
@@ -471,6 +502,16 @@ type vmWrite struct {
 	// create says this is the create body, where a machine's keys travel
 	// inside credentials.
 	create bool
+	// devices and portGroups are the configuration's: sent only when it
+	// writes them (an empty list removes them); left out, the platform keeps
+	// what the machine has.
+	devices, portGroups types.List
+}
+
+// sends says what a write of these settings sends beside the machine's own:
+// the devices and the port groups.
+func (wr vmWrite) sends() (devices, groups bool) {
+	return known(wr.devices), known(wr.portGroups)
 }
 
 // normalizeKey is a public key line the way the platform keeps it: single
@@ -536,6 +577,11 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 		spec["storageSize"] = fmt.Sprintf("%dGi", m.DiskGi.ValueInt64())
 	}
 	vmCoresSpec(m, spec)
+	vmTimeZoneSpec(m, spec)
+	vmDevicesSpec(wr.devices, spec)
+	if groups := portGroupsSpec(ctx, wr.portGroups); groups != nil {
+		spec["portGroups"] = groups
+	}
 	keys := configuredKeys(ctx, m.SSHKeys)
 	if wr.password != "" {
 		creds := map[string]any{
@@ -627,13 +673,15 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 }
 
 // refreshVMSpec reads back what the platform decides: when the machine will
-// stop, and its keys when the configuration leaves them alone; it warns when
-// the platform didn't keep the machine's cores as written.
-func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, diags *diag.Diagnostics) {
+// stop, its keys when the configuration leaves them alone, its groups'
+// offsets; it warns when the platform didn't keep the machine's cores,
+// devices, groups or time zone as the write (wr) sent them.
+func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, wr vmWrite, diags *diag.Diagnostics) {
 	var w *client.Workload
 	if ws, err := c.Workloads(ctx); err == nil {
 		w = findWorkload(ws, m.Name.ValueString())
 	}
+	sentDevices, sentGroups := wr.sends()
 	if w == nil {
 		m.ExpiresAt = types.StringValue("")
 		if m.SSHKeys.IsUnknown() {
@@ -641,6 +689,11 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, di
 		}
 		settleVMSizes(m, nil)
 		settleVMCores(m, nil)
+		settleVMDevices(m, nil, false, diags)
+		settleVMPortGroups(ctx, m, nil, false, diags)
+		if m.TimeZone.IsUnknown() {
+			m.TimeZone = types.StringNull()
+		}
 		return
 	}
 	m.ExpiresAt = types.StringValue(w.ExpiresAt)
@@ -650,6 +703,9 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, di
 	settleVMSizes(m, w.VM)
 	settleVMCores(m, w.VM)
 	warnCoresNotKept(m.Name.ValueString(), *m, w.VM, diags)
+	settleVMDevices(m, w.VM, sentDevices, diags)
+	settleVMPortGroups(ctx, m, w.VM, sentGroups, diags)
+	settleVMTimeZone(m, w.VM, diags)
 }
 
 // readVMSizes fills the machine's sizes from the platform's copy: the
@@ -728,6 +784,10 @@ func (r *vmResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequ
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	if e := timeZoneChange(plan, state); e != nil && !replacing(ctx, req) {
+		resp.Diagnostics.AddAttributeError(path.Root("time_zone"), e[0], e[1])
+		return
+	}
 	if keys := configuredKeys(ctx, plan.SSHKeys); keys != nil && len(keys) == 0 && len(state.SSHKeys.Elements()) > 0 {
 		resp.Diagnostics.AddAttributeError(path.Root("ssh_keys"), "A machine's keys can't be emptied",
 			"The platform keeps the last keys a machine was given, so an empty list would never take effect. "+
@@ -746,7 +806,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	wr := vmWrite{password: cfg.PasswordWO.ValueString(), create: true}
+	wr := vmWrite{password: cfg.PasswordWO.ValueString(), create: true, devices: cfg.Devices, portGroups: cfg.PortGroups}
 	if !plan.Stopped.ValueBool() {
 		wr.stopAfter = plan.StopAfter.ValueString()
 	}
@@ -774,7 +834,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
-	refreshVMSpec(ctx, r.data.Client, &plan, &resp.Diagnostics)
+	refreshVMSpec(ctx, r.data.Client, &plan, wr, &resp.Diagnostics)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, plan.Name.ValueString(), "machine", plan.Database, vmBlock, &resp.Diagnostics)
@@ -829,6 +889,9 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	}
 	readVMSizes(&state, sp)
 	readVMCores(&state, sp)
+	state.Devices = readVMDevices(sp)
+	state.TimeZone = readVMTimeZone(sp)
+	state.PortGroups = readPortGroups(sp)
 	if raw, ok := sp["allowCIDRs"].([]any); ok {
 		vals := make([]attr.Value, 0, len(raw))
 		for _, c := range raw {
@@ -867,11 +930,12 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		password = cfg.PasswordWO.ValueString()
 	}
 	reach := reachOf(ctx, cfg.ReachableFrom)
+	wr := vmWrite{password: password, stopAfter: stopAfterToSend(plan, state), devices: cfg.Devices, portGroups: cfg.PortGroups}
 	w := client.Workload{
 		ID:            plan.Name.ValueString(),
 		Type:          plan.workloadType(),
 		Stopped:       plan.Stopped.ValueBool(),
-		VM:            vmSpec(ctx, plan, vmWrite{password: password, stopAfter: stopAfterToSend(plan, state)}),
+		VM:            vmSpec(ctx, plan, wr),
 		ReachableFrom: reach,
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
@@ -886,7 +950,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready after update", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
-	refreshVMSpec(ctx, r.data.Client, &plan, &resp.Diagnostics)
+	refreshVMSpec(ctx, r.data.Client, &plan, wr, &resp.Diagnostics)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, w.ID, "machine", plan.Database, vmBlock, &resp.Diagnostics)

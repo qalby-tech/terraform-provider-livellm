@@ -333,3 +333,28 @@ func (c *Client) MachineCores(ctx context.Context) (*MachineCores, error) {
 	}
 	return &mc, nil
 }
+
+// MachineDevice is one of the cluster's devices a machine of the key's
+// workspace may be given (GET /v1/machine-devices): a GPU or a USB
+// controller, how many the cluster has, how many no machine has, and this
+// workspace's machines that have it.
+type MachineDevice struct {
+	ID    string   `json:"id"`
+	Label string   `json:"label"`
+	Kind  string   `json:"kind"`
+	Total int      `json:"total"`
+	Free  int      `json:"free"`
+	Here  []string `json:"here"`
+}
+
+// MachineDevices lists the devices a machine of the key's workspace may be
+// given; empty where the cluster offers none.
+func (c *Client) MachineDevices(ctx context.Context) ([]MachineDevice, error) {
+	var out struct {
+		Devices []MachineDevice `json:"devices"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/machine-devices", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Devices, nil
+}
