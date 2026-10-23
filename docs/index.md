@@ -210,7 +210,8 @@ owner of the organization to give it more under Organization → Billing. Pay as
 you go past its monthly limit, a card missing, a payment overdue and pay as you
 go not yet open to the account each get their own diagnostic, naming what a
 person does on the Billing page (an API key can't add a card, pay or raise the
-limit). Create/update timeouts are configurable per resource via the standard `timeouts` block.
+limit). A dedicated core (`dedicated_cores = true`) counts as 2 of the plan's
+cores, and as 2 on pay as you go; a shared core counts as 1. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`, `auth_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.

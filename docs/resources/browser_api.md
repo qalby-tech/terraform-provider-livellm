@@ -138,7 +138,7 @@ or less memory.
 - `remote_auth_version` (Number) Change it to send new `auth_wo` values when
   nothing else changed: a write-only value alone makes no plan.
 - `cpu` (String) CPU request, e.g. `500m`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the Browser API has.
-- `dedicated_cores` (Boolean) All of `cpu` reserved on its server, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
+- `dedicated_cores` (Boolean) Whole cores of its server for it alone, all of `cpu`, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs (2, 4, 6…), and the platform refuses another count at apply, in its own words. A dedicated core counts as 2 of the plan's cores (and as 2 cores on pay as you go). Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
 - `memory` (String) Memory request, e.g. `1Gi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the Browser API has.
 - `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. A replacement is a new resource: it starts from this attribute, and other resources lose its name (see [Replacing a resource](../index.md#replacing-a-resource)). Through a key, letting more in needs the **Network** permission, except between resources the key made itself or when this resource already lets the whole workspace in; setting `["*"]` always needs it (see [Inside the workspace](../index.md#inside-the-workspace)). Whatever may reach it can drive every browser it holds, with no key inside the workspace.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
@@ -152,6 +152,7 @@ A Browser API needs at least one of `browsers`, `all_browsers = true` or a
 ### Read-Only
 
 - `ready` (Boolean) Whether the Browser API is up.
+- `running_cpu_model` (String) The CPU model of the server the running Browser API runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
 - `remote_browser.has_auth` (Boolean) Whether a header is stored for that
   remote browser. The header itself is never read back. It is planned from the
   configuration (`true` with `auth_wo`, `false` without), so a header set or

@@ -1,14 +1,15 @@
 ---
 page_title: "livellm_machine_cores Data Source - livellm"
 description: |-
-  The cores a new machine with dedicated cores can get: the servers' clock speeds and how many cores of each are free.
+  The cores a new machine with dedicated cores can get: the servers' clock speeds, their CPU model and how many cores of each are free.
 ---
 
 # livellm_machine_cores (Data Source)
 
 Reads what a new machine with `dedicated_cores = true` can get on the servers
 the workspace may run on: the clock speeds the servers' cores run at, the
-values `core_speed` takes, and how many cores of each one server has free.
+values `core_speed` takes, the CPU model of the servers with each, and how
+many cores of each one server has free.
 
 It takes no arguments: the API key already names the workspace.
 
@@ -31,13 +32,17 @@ resource "livellm_vm" "build" {
 }
 
 output "core_speeds" {
-  # Fastest first: [{ speed = 5700, fit = 12 }, { speed = 4400, fit = 16 }]
+  # Fastest first: [{ speed = 5700, fit = 12, model = "Intel Core i9-14900K" },
+  #                { speed = 4400, fit = 16, model = "Intel Core i9-14900K" }]
   value = data.livellm_machine_cores.this.speeds
 }
 ```
 
 A speed's `fit` counts the cores free on one server (cores any workspace's
-machines hold are not free), no more than the server has room for. Memory
+dedicated resources hold are not free), no more than the server has room for.
+It counts whole cores: on servers whose cores have 2 threads, where dedicated
+cores come in pairs, it is even, and `cpus` takes an even count there too
+(another is refused at apply, in the platform's words). Memory
 isn't counted: it is judged when the machine is saved. A machine with more
 cores than its speed's `fit` is refused ("Only 6 cores at 5.7 GHz are
 available. Continue with mixed core speeds?"), and one with `core_speed` left
@@ -66,7 +71,9 @@ from it changes only when the servers do.
   - `speed` (Number) The clock in MHz every core of this speed reaches, for
     `core_speed`.
   - `fit` (Number) The most cores of this speed a new machine can get on one
-    server.
+    server, in whole cores (an even count where they have 2 threads).
+  - `model` (String) The CPU model of the servers whose cores run at this
+    speed (`"Intel Core i9-14900K"`). Null from a platform that doesn't say.
 - `dedicated_fit` (Number) The most cores of one speed a new machine can get
   on one server, any speed.
 

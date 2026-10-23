@@ -47,8 +47,9 @@ output "api_url" {
 - `phase` (String) Lifecycle phase (`Pending`, `Running`, …).
 - `ssh` (String) `host:port` to SSH into the VM. Empty until assigned.
 - `url` (String) The first exposed HTTP port's public HTTPS URL. Empty when no HTTP port is exposed.
-- `running_core_speed` (Number) The clock in MHz of the cores the running VM got, when they are all of one speed. Null while it isn't running, when they run at different speeds, and where the servers list no speeds.
-- `running_mixed_speeds` (Boolean) `true` when the running VM's cores run at different clock speeds, `false` when they are all of one speed. Null while it isn't running and where the servers list no speeds.
+- `running_core_speed` (Number) Dedicated cores only: the clock in MHz of the cores the running VM got, when they are all of one speed. Null on shared cores (they have no clock), while it isn't running, when they run at different speeds, and where the servers list no speeds.
+- `running_mixed_speeds` (Boolean) Dedicated cores only: `true` when the running VM's cores run at different clock speeds, `false` when they are all of one speed. Null on shared cores, while it isn't running and where the servers list no speeds.
+- `running_cpu_model` (String) The CPU model of the server the running VM runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
 - `endpoints` (List of Object) Every exposed port:
   - `name` (String) Port name.
   - `url` (String) Public HTTPS URL — HTTP ports.

@@ -163,11 +163,14 @@ resource "livellm_vm" "build" {
 }
 ```
 
-With dedicated cores: every core reserved for the machine on its server,
-instead of shared (the default), which may be slower when the server is busy.
-On servers whose cores run at different clock speeds, the cores are all of one
-speed: `core_speed` asks for one, in MHz, and left out the platform picks any
-cores of one speed that fit.
+With dedicated cores: whole cores of its server for the machine alone, nothing
+else runs on them, instead of shared (the default), which may be slower when
+the server is busy. On servers whose cores have 2 threads, dedicated cores come
+in pairs (`cpus` = 2, 4, 6…): the platform refuses another count at apply, in
+its own words. A dedicated core counts as 2 of the plan's cores, and as 2 on
+pay as you go. On servers whose cores run at different clock speeds, the cores
+are all of one speed: `core_speed` asks for one, in MHz, and left out the
+platform picks any cores of one speed that fit.
 [`livellm_machine_cores`](../data-sources/machine_cores.md) lists the servers'
 speeds and how many cores of each a new machine can get. Where every server
 has one speed, leave `core_speed` out:
@@ -184,7 +187,13 @@ resource "livellm_vm" "build" {
 }
 
 output "build_clock" { value = livellm_vm.build.running_core_speed } # 5700
+output "build_cpu" { value = livellm_vm.build.running_cpu_model } # "Intel Core i9-14900K"
 ```
+
+`running_core_speed` and `running_mixed_speeds` are for dedicated cores only:
+shared cores aren't reserved and have no clock, so on a shared machine both
+are null. `running_cpu_model` names the CPU of the server the machine runs on,
+shared or dedicated.
 
 A change reaches a running machine at its next restart (`stopped = true`,
 then `false`). Left out of the configuration, each of the three keeps what the
@@ -203,6 +212,7 @@ what to write instead:
 | "Only 6 cores at 5.7 GHz are available. Continue with mixed core speeds?" | `cpus = 6`, or `mixed_speeds = true` |
 | "No server has 20 free cores of one speed. Continue with cores of mixed speeds?" | `cpus` = the most of one speed that fit (the error names it), or `mixed_speeds = true` |
 | "No server this machine may run on has cores at 3 GHz." | a `core_speed` the servers have, or `0` for any one speed |
+| that dedicated cores come in pairs on these servers, naming the counts that fit | `cpus` = one of them |
 
 `mixed_speeds = true` keeps the count with cores that may run at different
 speeds, and `running_mixed_speeds` then reads `true`; `false` asks for cores
@@ -343,7 +353,7 @@ next to it.
 - `cpus` (Number) How many cores (a core is one host thread). Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
 - `memory_gi` (Number) Memory in GiB. Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
 - `disk_gi` (Number) Root disk in GiB. Windows needs at least 64 (and gets 64 when this is left out). Left out, the platform's default for the kind of machine is read back (no plan to change it); removing it later keeps the size the machine has.
-- `dedicated_cores` (Boolean) Every core reserved for this machine on its server, instead of shared (the default). On servers whose cores run at different clock speeds, they are all of one speed. Left out, the machine keeps what it has (`false` on a new machine); `false` makes them shared. A change reaches a running machine at its next restart. See [the example](#example-usage) for the refusals.
+- `dedicated_cores` (Boolean) Whole cores of its server for this machine alone, instead of shared (the default). On servers whose cores have 2 threads, dedicated cores come in pairs (`cpus` = 2, 4, 6…), and the platform refuses another count at apply. On servers whose cores run at different clock speeds, they are all of one speed. A dedicated core counts as 2 of the plan's cores. Left out, the machine keeps what it has (`false` on a new machine); `false` makes them shared. A change reaches a running machine at its next restart. See [the example](#example-usage) for the refusals.
 - `core_speed` (Number) With `dedicated_cores`, where the servers' cores run at different clock speeds: the clock in MHz of the cores to get (`5700` for 5.7 GHz), one of the servers' speeds (the [`livellm_machine_cores`](../data-sources/machine_cores.md) data source lists them). `0` (the default): any cores of one speed. Left out, the machine keeps what it has. A speed above `0` is refused at plan time on shared cores.
 - `mixed_speeds` (Boolean) With `dedicated_cores`: keep this many cores although no single clock speed has that many free, so they may run at different speeds (the console's Continue with mixed speeds). Left out, the machine keeps what it has (`false` on a new machine); `false` asks for cores of one speed again. Refused at plan time on shared cores.
 - `devices` (List of String, at most 8) The cluster's devices this machine has, by id: a GPU, a USB controller (the [`livellm_machine_devices`](../data-sources/machine_devices.md) data source lists them). Each is passed through to the machine, which then stays on the server that has it; a device is one machine's at a time. A change reaches a running machine at its next restart. Left out, the machine keeps what it has (none on a new machine); `[]` removes them.
@@ -384,8 +394,9 @@ next to it.
 - `ssh` (String) `host:port` to SSH into the VM.
 - `url` (String) The first exposed HTTP port's public HTTPS URL.
 - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`).
-- `running_core_speed` (Number) The clock in MHz of the cores the running machine got, when they are all of one speed. Null while it isn't running, when they run at different speeds, and where the servers list no speeds.
-- `running_mixed_speeds` (Boolean) `true` when the running machine's cores run at different clock speeds (the console's "Mixed core speeds"), `false` when they are all of one speed. Null while it isn't running and where the servers list no speeds.
+- `running_core_speed` (Number) Dedicated cores only: the clock in MHz of the cores the running machine got, when they are all of one speed. Null on shared cores (they have no clock), while it isn't running, when they run at different speeds, and where the servers list no speeds.
+- `running_mixed_speeds` (Boolean) Dedicated cores only: `true` when the running machine's cores run at different clock speeds (the console's "Mixed core speeds"), `false` when they are all of one speed. Null on shared cores (they have no clock), while it isn't running and where the servers list no speeds.
+- `running_cpu_model` (String) The CPU model of the server the running machine runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
 
 ## Import
 

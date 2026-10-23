@@ -75,7 +75,7 @@ or less memory.
 
 - `image` (String) A desktop image. Leave it out for the platform's (`ghcr.io/qalby-tech/livellm-desktop:xfce`); your own works if it follows that image's contract.
 - `cpu` (String) CPU, e.g. `2`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
-- `dedicated_cores` (Boolean) All of `cpu` reserved on its server, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
+- `dedicated_cores` (Boolean) Whole cores of its server for it alone, all of `cpu`, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs (2, 4, 6…), and the platform refuses another count at apply, in its own words. A dedicated core counts as 2 of the plan's cores (and as 2 cores on pay as you go). Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
 - `memory` (String) Memory, e.g. `4Gi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
 - `resolution` (String) Screen size, e.g. `1280x800` (the default).
 - `keep_files` (Boolean) Give the desktop a home folder that survives restarts. By default it starts clean every time. Replaces the app when changed.
@@ -92,6 +92,7 @@ or less memory.
 ### Read-Only
 
 - `ready` (Boolean) Whether the desktop is up.
+- `running_cpu_model` (String) The CPU model of the server the running Desktop App runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
 
 ## Import
 

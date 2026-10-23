@@ -50,25 +50,35 @@
 - **Shared or dedicated cores on apps, Desktop Apps, databases, browsers and
   Browser APIs.** `livellm_container_app`, `livellm_desktop_app`,
   `livellm_storage` (Postgres and Redis), `livellm_browser` and
-  `livellm_browser_api` take `dedicated_cores = true`: all of `cpu` reserved
-  on the server. Shared cores, the default, reserve a quarter of `cpu` and may
-  still use all of it. Optional and computed like the machine's: left out, a
-  resource keeps what it has; `false` makes them shared. An object storage
-  has none: `dedicated_cores = true` with `engine = "s3"` is an error at plan
-  time.
-- **Dedicated cores.** `livellm_vm` takes `dedicated_cores = true`: every
-  core reserved for the machine on its server, instead of shared (the
-  default), which may be slower when the server is busy. On servers whose
-  cores run at different clock speeds the cores are all of one speed:
-  `core_speed` asks for one, in MHz (`5700` for 5.7 GHz; left out or `0`, any
-  one speed), and `mixed_speeds = true` keeps the count with cores that may
-  run at different speeds. A change reaches a running machine at its next
-  restart.
+  `livellm_browser_api` take `dedicated_cores = true`: whole cores of the
+  server for the resource alone, all of `cpu`. Shared cores, the default,
+  reserve a quarter of `cpu` and may still use all of it. Optional and
+  computed like the machine's: left out, a resource keeps what it has;
+  `false` makes them shared. An object storage has none:
+  `dedicated_cores = true` with `engine = "s3"` is an error at plan time.
+- **Dedicated cores.** `livellm_vm` takes `dedicated_cores = true`: whole
+  cores of its server for the machine alone, nothing else runs on them,
+  instead of shared (the default), which may be slower when the server is
+  busy. On servers whose cores run at different clock speeds the cores are
+  all of one speed: `core_speed` asks for one, in MHz (`5700` for 5.7 GHz;
+  left out or `0`, any one speed), and `mixed_speeds = true` keeps the count
+  with cores that may run at different speeds. A change reaches a running
+  machine at its next restart.
 - The three are optional and computed, as the sizes are: left out, a machine
   keeps what it has, the console's choice included, and a new one is shared;
   `false` and `0` clear. `dedicated_cores = false` clears `core_speed` and
   `mixed_speeds`, and setting either on shared cores is an error at plan
   time. A refresh and an import read all three.
+- **Dedicated cores come in pairs, and count as 2.** On servers whose cores
+  have 2 threads, a dedicated resource's count is even (`cpus` or `cpu` 2, 4,
+  6…); shared cores take any count. The platform judges it, so nothing is
+  refused at plan time: another count is refused at apply in the platform's
+  words, which name the counts that fit (only a new or changed count is
+  judged, so an existing odd one keeps running). A dedicated core counts as
+  2 of the plan's cores, and as 2 on pay as you go; a shared core as 1.
+- Any refusal the platform answers with 422 that has no diagnostic of its
+  own reads as the resource's error followed by the platform's words
+  ("Cannot create VM: …"), no longer the raw answer.
 - **Cores and room refused in the platform's words.** A create or an update
   the platform refuses says what it said and what to write: too few cores at
   the speed asked for ("Only 6 cores at 5.7 GHz are available. Continue with
@@ -82,20 +92,30 @@
   App, that is new, started, grown or moved): stop or shrink another
   resource, or ask for less.
 - `running_core_speed` and `running_mixed_speeds` (computed, on `livellm_vm`
-  and on the `livellm_vm` and `livellm_vms` data sources): the clock in MHz of
-  the running machine's cores when they are all of one speed, or that they
-  run at different clock speeds; null while it isn't running and where the
-  servers list no speeds.
+  and on the `livellm_vm` and `livellm_vms` data sources), for dedicated
+  cores only: the clock in MHz of the running machine's cores when they are
+  all of one speed, or that they run at different clock speeds. Shared cores
+  aren't reserved and have no clock: both are null on a shared machine, as
+  while it isn't running and where the servers list no speeds.
+- `running_cpu_model` (computed, on `livellm_vm`, `livellm_container_app`,
+  `livellm_desktop_app`, `livellm_storage`, `livellm_browser`,
+  `livellm_browser_api` and the `livellm_vm` and `livellm_vms` data
+  sources): the CPU model of the server the running resource runs on, shared
+  or dedicated (`"Intel Core i9-14900K"`); null while it isn't running.
 - The `livellm_machine_cores` data source: what a new machine with dedicated
   cores can get. `speeds` lists the servers' clock speeds, fastest first
-  (`speed`, the values `core_speed` takes), each with `fit`, the most cores of
-  it a new machine can get on one server; `dedicated_fit` is the most of one
+  (`speed`, the values `core_speed` takes), each with its CPU `model` and
+  `fit`, the most cores of it a new machine can get on one server, in whole
+  cores (even where they have 2 threads); `dedicated_fit` is the most of one
   speed, any speed. Where every server runs at one speed, `show_speed` is
   `false` and `speeds` empty. On an API without dedicated cores the read
   fails ("Cannot read the cores").
 - `cpus` is described in cores (a core is one host thread).
 - Needs LiveLLM API 0.78 or newer for all of it (dedicated cores on
-  machines from 0.77). An older API ignores what it
+  machines from 0.77); the CPU model, the pairs and the clock for dedicated
+  cores only need the platform's release after 0.78. An older one names no
+  CPU model (`running_cpu_model` and `model` read null) and still reports a
+  clock, or mixed speeds, for shared cores. An older API ignores what it
   doesn't know: the apply warns ("Cores not kept as written", "Devices not
   kept as written", "Port groups not kept as written"), the cores stay
   shared, and the next plan shows the difference. A time zone it ignores

@@ -328,7 +328,7 @@ shrink another resource, or give this one fewer cores or less memory.
   - `password` (String, Required, Sensitive) Registry password or access token. Stored write-only by the platform; sent from configuration on every apply.
 - `command` (List of String) Entrypoint override.
 - `cpu` (String) CPU request, e.g. `500m`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
-- `dedicated_cores` (Boolean) All of `cpu` reserved on its server, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. Per copy. Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
+- `dedicated_cores` (Boolean) Whole cores of its server for it alone, all of `cpu`, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs (2, 4, 6…), and the platform refuses another count at apply, in its own words. A dedicated core counts as 2 of the plan's cores (and as 2 cores on pay as you go). Per copy. Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
 - `memory` (String) Memory request, e.g. `512Mi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
 - `env` (Map of String) Plain environment variables.
 - `secret_env` (Map of String, Sensitive) Environment variables with secret
@@ -414,6 +414,7 @@ shrink another resource, or give this one fewer cores or less memory.
 ### Read-Only
 
 - `ready` (Boolean) Whether the app is running (`false` while stopped).
+- `running_cpu_model` (String) The CPU model of the server the running app runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
 - `url` (String) The first HTTP port's public HTTPS URL.
 - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`). An HTTP port has a `url`; a raw port has `addr` (`host:port`) with `tcp` or `udp` set.
 

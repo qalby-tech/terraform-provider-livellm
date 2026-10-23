@@ -2,8 +2,9 @@
 
 Lists the servers' core speeds with the cores of each a new machine can get
 (`livellm_machine_cores`), creates one machine, `build-box`, with 2 dedicated
-cores and 4 GiB of memory, and prints the clock of the cores it got once it
-runs.
+cores (a pair, as servers whose cores have 2 threads take them) and 4 GiB of
+memory, and prints the clock of the cores it got and its server's CPU model
+once it runs.
 
 ```sh
 export LIVELLM_API_KEY=llc_…

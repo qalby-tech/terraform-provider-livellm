@@ -88,7 +88,9 @@ organization's workspace ask an owner of the organization to give it more under
 Organization → Billing. Pay as you go past its monthly limit, a card missing, a
 payment overdue and pay as you go not yet open to the account each get their
 own diagnostic, naming what a person does on the Billing page (an API key can't
-add a card, pay or raise the limit). Create/update timeouts are configurable per resource via the standard `timeouts` block.
+add a card, pay or raise the limit). A dedicated core (`dedicated_cores = true`)
+counts as 2 of the plan's cores, and as 2 on pay as you go; a shared core
+counts as 1. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
@@ -99,8 +101,8 @@ OpenTofu 1.11+.
   `livellm_workspace` data source. Full per-resource examples live in the
   [registry documentation](https://registry.terraform.io/providers/qalby-tech/livellm/latest/docs).
 - [`examples/dedicated-machine`](examples/dedicated-machine) — the servers'
-  core speeds, a machine with dedicated cores and the clock of the cores it
-  got; applying it creates the machine.
+  core speeds, a machine with dedicated cores, the clock of the cores it got
+  and the CPU model of its server; applying it creates the machine.
 
 ## Developing the provider
 
