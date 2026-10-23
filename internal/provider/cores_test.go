@@ -416,7 +416,7 @@ func TestCoresRefusals(t *testing.T) {
 	// judge: its words as it says them, never a cores refusal's advice nor a
 	// count the provider made up.
 	for _, body := range []string{
-		`{"error":"Dedicated cores come in pairs on these servers: use 8 or 10.","code":"dedicated_pairs","workload":"ws","cores":9}`,
+		`{"error":"Dedicated cores come in pairs on these servers: use 8 or 10.","code":"cores_pairs","workload":"ws","cores":9,"choices":[8,10]}`,
 		`{"error":"Dedicated cores come in pairs on these servers: use 8 or 10."}`,
 	} {
 		var diags diag.Diagnostics
