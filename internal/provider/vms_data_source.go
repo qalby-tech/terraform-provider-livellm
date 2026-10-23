@@ -44,12 +44,13 @@ func (d *vmsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 						"url":   schema.StringAttribute{Computed: true, Description: "First exposed HTTP port's URL, if any."},
 						"running_core_speed": schema.Int64Attribute{
 							Computed:    true,
-							Description: "Clock in MHz of the running VM's cores, when they are all of one speed; else null.",
+							Description: "Dedicated cores only: clock in MHz of the running VM's cores, when they are all of one speed; else null (always on shared cores).",
 						},
 						"running_mixed_speeds": schema.BoolAttribute{
 							Computed:    true,
-							Description: "True when the running VM's cores run at different clock speeds; null when not running or no speeds are listed.",
+							Description: "Dedicated cores only: true when the running VM's cores run at different clock speeds; null on shared cores, when not running or no speeds are listed.",
 						},
+						"running_cpu_model": schema.StringAttribute{Computed: true, Description: runningCPUModelDescription},
 						"endpoints": schema.ListNestedAttribute{
 							Computed:    true,
 							Description: "Every exposed port (url for HTTP, addr for raw TCP/UDP).",
@@ -91,6 +92,7 @@ var vmObjAttrTypes = map[string]attr.Type{
 	"url":                  types.StringType,
 	"running_core_speed":   types.Int64Type,
 	"running_mixed_speeds": types.BoolType,
+	"running_cpu_model":    types.StringType,
 	"endpoints":            types.ListType{ElemType: types.ObjectType{AttrTypes: endpointAttrTypes}},
 }
 
@@ -128,6 +130,7 @@ func vmModelFrom(ctx context.Context, w client.WorkloadStatus) (vmModel, diag.Di
 		URL:              types.StringValue(url),
 		RunningCoreSpeed: speed,
 		RunningMixed:     mixed,
+		RunningCPUModel:  runningCPUModel(&w),
 		Endpoints:        epList,
 	}, diags
 }

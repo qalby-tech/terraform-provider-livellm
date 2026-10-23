@@ -81,6 +81,13 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 		)
 		return
 	}
+	// Any other 422 is the platform's refusal of what was asked, in its own
+	// words (dedicated cores in pairs on servers whose cores have 2 threads,
+	// a size under a kind's floor): shown as it says it, never judged here.
+	if errors.As(err, &apiErr) && apiErr.Status == 422 && apiErr.Message() != apiErr.Body {
+		diags.AddError(summary, fmt.Sprintf("%s: %s", summary, apiErr.Message()))
+		return
+	}
 	diags.AddError(summary, err.Error())
 }
 

@@ -64,28 +64,33 @@ func TestAPIErrorCount(t *testing.T) {
 	}
 }
 
-// The status's cores decode: one speed, or mixed with the platform's words;
-// absent from a platform that doesn't say.
+// The status's cores decode: dedicated cores of one speed, or mixed with the
+// platform's words; shared cores the server's CPU model alone; absent from a
+// platform that doesn't say.
 func TestStatusCores(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"workloads":[
-			{"id":"fast","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"speedMHz":5700}},
+			{"id":"fast","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"speedMHz":5700,"model":"Intel Core i9-14900K"}},
 			{"id":"mixed","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"mixed":true,"message":"Mixed core speeds"}},
-			{"id":"old","type":"vm-ubuntu","phase":"Running","ready":true}]}`))
+			{"id":"old","type":"vm-ubuntu","phase":"Running","ready":true},
+			{"id":"web","type":"pod","phase":"Running","ready":true,"cores":{"model":"AMD EPYC 9654"}}]}`))
 	}))
 	defer srv.Close()
 	st, err := New(srv.URL, "llc_test").Status(context.Background())
-	if err != nil || len(st.Workloads) != 3 {
+	if err != nil || len(st.Workloads) != 4 {
 		t.Fatalf("status: %v %v", st, err)
 	}
-	if c := st.Workloads[0].Cores; c == nil || c.SpeedMHz != 5700 || c.Mixed {
+	if c := st.Workloads[0].Cores; c == nil || c.SpeedMHz != 5700 || c.Mixed || c.Model != "Intel Core i9-14900K" {
 		t.Errorf("fast: %+v", c)
 	}
 	if c := st.Workloads[1].Cores; c == nil || !c.Mixed || c.SpeedMHz != 0 ||
-		c.Message != "Mixed core speeds" {
+		c.Message != "Mixed core speeds" || c.Model != "" {
 		t.Errorf("mixed: %+v", c)
 	}
 	if c := st.Workloads[2].Cores; c != nil {
 		t.Errorf("old: %+v", c)
+	}
+	if c := st.Workloads[3].Cores; c == nil || c.SpeedMHz != 0 || c.Mixed || c.Model != "AMD EPYC 9654" {
+		t.Errorf("shared: %+v", c)
 	}
 }

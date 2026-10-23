@@ -2,11 +2,20 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	dsschema "github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
+
+	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
 // dedicated_cores on an app, a Desktop App, a database, a browser and a
@@ -82,5 +91,114 @@ func TestStorageDedicatedCores(t *testing.T) {
 	pg.DedicatedCores = types.BoolValue(true)
 	if got := storageConfigErrors(pg); len(got) != 0 {
 		t.Errorf("postgres with dedicated cores: %v", got)
+	}
+}
+
+// running_cpu_model on every kind with cores: computed only, and read from
+// the status row of the running resource (the server's CPU model, shared or
+// dedicated); null when the platform doesn't say.
+func TestRunningCPUModel(t *testing.T) {
+	ctx := context.Background()
+	for name, r := range map[string]func() resource.Resource{
+		"vm":            NewVMResource,
+		"container_app": NewContainerAppResource,
+		"desktop_app":   NewDesktopAppResource,
+		"storage":       NewStorageResource,
+		"browser":       NewBrowserResource,
+		"browser_api":   NewBrowserAPIResource,
+	} {
+		var resp resource.SchemaResponse
+		r().Schema(ctx, resource.SchemaRequest{}, &resp)
+		v, ok := resp.Schema.Attributes["running_cpu_model"].(schema.StringAttribute)
+		if !ok || !v.Computed || v.Optional || v.Required || v.Description != runningCPUModelDescription {
+			t.Errorf("%s.running_cpu_model: %+v", name, resp.Schema.Attributes["running_cpu_model"])
+		}
+		if d := resp.Schema.ValidateImplementation(ctx); d.HasError() {
+			t.Errorf("%s: schema: %v", name, d)
+		}
+	}
+	for name, d := range map[string]func() datasource.DataSource{"vm": NewVMDataSource, "vms": NewVMsDataSource} {
+		var resp datasource.SchemaResponse
+		d().Schema(ctx, datasource.SchemaRequest{}, &resp)
+		a := resp.Schema.Attributes["running_cpu_model"]
+		if l, ok := resp.Schema.Attributes["vms"].(dsschema.ListNestedAttribute); ok {
+			a = l.NestedObject.Attributes["running_cpu_model"]
+		}
+		if a == nil || !a.IsComputed() || a.IsOptional() || a.IsRequired() {
+			t.Errorf("data %s.running_cpu_model: %+v", name, a)
+		}
+	}
+
+	const i9 = "Intel Core i9-14900K"
+	c := coresPlatform(t, client.Workload{ID: "web", Type: "pod"}, strings.Join([]string{
+		`{"id":"web","type":"pod","phase":"Running","ready":true,"cores":{"model":"` + i9 + `"}}`,
+		`{"id":"desk","type":"desktop","phase":"Running","ready":true,"cores":{"speedMHz":5700,"model":"` + i9 + `"}}`,
+		`{"id":"db","type":"storage","phase":"Running","ready":true,"cores":{"model":"` + i9 + `"}}`,
+		`{"id":"off","type":"pod","phase":"Stopped","ready":false}`,
+	}, ","))
+	var diags diag.Diagnostics
+	var app containerAppModel
+	refreshAppStatus(ctx, c, "web", &app, &diags)
+	if !app.RunningCPUModel.Equal(types.StringValue(i9)) {
+		t.Errorf("app: %v", app.RunningCPUModel)
+	}
+	var off containerAppModel
+	refreshAppStatus(ctx, c, "off", &off, &diags)
+	if !off.RunningCPUModel.IsNull() {
+		t.Errorf("stopped app: %v", off.RunningCPUModel)
+	}
+	var gone containerAppModel
+	refreshAppStatus(ctx, c, "gone", &gone, &diags)
+	if !gone.RunningCPUModel.IsNull() {
+		t.Errorf("an app the status doesn't list: %v", gone.RunningCPUModel)
+	}
+	desk := desktopAppModel{Name: types.StringValue("desk")}
+	refreshDesktopStatus(ctx, c, &desk)
+	if !desk.RunningCPUModel.Equal(types.StringValue(i9)) {
+		t.Errorf("desktop: %v", desk.RunningCPUModel)
+	}
+	db := storageModel{Name: types.StringValue("db")}
+	refreshStorageStatus(ctx, c, &db, &diags)
+	if !db.RunningCPUModel.Equal(types.StringValue(i9)) {
+		t.Errorf("database: %v", db.RunningCPUModel)
+	}
+	if diags.HasError() {
+		t.Errorf("diags: %v", diags)
+	}
+}
+
+// A browser's and a Browser API's refresh read the model of the server they
+// run on.
+func TestBrowserReadsCPUModel(t *testing.T) {
+	ctx := context.Background()
+	const i9 = "Intel Core i9-14900K"
+	for _, c := range []struct {
+		name string
+		r    func() resource.Resource
+		w    client.Workload
+	}{
+		{"browser", NewBrowserResource, client.Workload{ID: "b1", Type: "browser", Browser: map[string]any{"cpu": "1", "memory": "1Gi"}}},
+		{"browser_api", NewBrowserAPIResource, client.Workload{ID: "b1", Type: "controller", Controller: map[string]any{"cpu": "250m", "memory": "256Mi"}}},
+	} {
+		r := c.r()
+		r.(resource.ResourceWithConfigure).Configure(ctx, resource.ConfigureRequest{
+			ProviderData: &providerData{Client: coresPlatform(t, c.w,
+				`{"id":"b1","type":"`+c.w.Type+`","phase":"Running","ready":true,"cores":{"model":"`+i9+`"}}`)},
+		}, &resource.ConfigureResponse{})
+		var sr resource.SchemaResponse
+		r.Schema(ctx, resource.SchemaRequest{}, &sr)
+		st := tfsdk.State{Schema: sr.Schema, Raw: tftypes.NewValue(sr.Schema.Type().TerraformType(ctx), nil)}
+		st.SetAttribute(ctx, path.Root("name"), "b1")
+		resp := resource.ReadResponse{State: st}
+		r.Read(ctx, resource.ReadRequest{State: st}, &resp)
+		if resp.Diagnostics.HasError() {
+			t.Errorf("%s: read: %v", c.name, resp.Diagnostics)
+			continue
+		}
+		var got types.String
+		resp.State.GetAttribute(ctx, path.Root("running_cpu_model"), &got)
+		if !got.Equal(types.StringValue(i9)) {
+			t.Errorf("%s: running_cpu_model %v", c.name, got)
+		}
 	}
 }

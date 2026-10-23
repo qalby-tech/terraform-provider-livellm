@@ -97,15 +97,16 @@ func TestMachineCoresRead(t *testing.T) {
 		speeds     []coreSpeedModel
 		fit        int64
 	}{
-		{"two speeds", `{"showSpeed":true,"speeds":[{"speedMHz":5700,"fit":6},{"speedMHz":4400,"fit":16}],"dedicatedFit":16}`,
+		{"two speeds", `{"showSpeed":true,"speeds":[{"speedMHz":5700,"fit":6,"model":"Intel Core i9-14900K"},` +
+			`{"speedMHz":4400,"fit":16,"model":"Intel Core i9-14900K"}],"dedicatedFit":16}`,
 			true, []coreSpeedModel{
-				{Speed: types.Int64Value(5700), Fit: types.Int64Value(6)},
-				{Speed: types.Int64Value(4400), Fit: types.Int64Value(16)},
+				{Speed: types.Int64Value(5700), Fit: types.Int64Value(6), Model: types.StringValue("Intel Core i9-14900K")},
+				{Speed: types.Int64Value(4400), Fit: types.Int64Value(16), Model: types.StringValue("Intel Core i9-14900K")},
 			}, 16},
-		{"a speed with no room", `{"showSpeed":true,"speeds":[{"speedMHz":5700,"fit":0},{"speedMHz":4400,"fit":8}],"dedicatedFit":8}`,
+		{"a speed with no room, from a platform that names no model", `{"showSpeed":true,"speeds":[{"speedMHz":5700,"fit":0},{"speedMHz":4400,"fit":8}],"dedicatedFit":8}`,
 			true, []coreSpeedModel{
-				{Speed: types.Int64Value(5700), Fit: types.Int64Value(0)},
-				{Speed: types.Int64Value(4400), Fit: types.Int64Value(8)},
+				{Speed: types.Int64Value(5700), Fit: types.Int64Value(0), Model: types.StringNull()},
+				{Speed: types.Int64Value(4400), Fit: types.Int64Value(8), Model: types.StringNull()},
 			}, 8},
 		{"one speed", `{"showSpeed":false,"speeds":[],"dedicatedFit":12}`, false, []coreSpeedModel{}, 12},
 		{"speeds left out", `{"showSpeed":false,"dedicatedFit":0}`, false, []coreSpeedModel{}, 0},

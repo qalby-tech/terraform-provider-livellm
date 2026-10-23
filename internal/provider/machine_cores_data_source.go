@@ -16,7 +16,8 @@ import (
 
 // data.livellm_machine_cores — what a new machine with dedicated cores can
 // get on the servers the workspace may run on: the servers' clock speeds, the
-// values core_speed takes, and how many cores of each are free on one server.
+// values core_speed takes, the CPU model of each, and how many cores of each
+// are free on one server (whole cores: in pairs where they have 2 threads).
 // No arguments: the key already pins the workspace.
 type machineCoresDataSource struct {
 	data *providerData
@@ -47,7 +48,10 @@ func (d *machineCoresDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 					Attributes: map[string]schema.Attribute{
 						"speed": schema.Int64Attribute{Computed: true, Description: "The clock in MHz every core of this speed reaches, for core_speed."},
 						"fit": schema.Int64Attribute{Computed: true, Description: "The most cores of this speed a new machine can get on " +
-							"one server: free, and no more than the server has room for. More at this speed are refused."},
+							"one server: free, whole cores (an even count where they have 2 threads), and no more than the " +
+							"server has room for. More at this speed are refused."},
+						"model": schema.StringAttribute{Computed: true, Description: "The CPU model of the servers whose cores " +
+							"run at this speed (\"Intel Core i9-14900K\"). Null from a platform that doesn't say."},
 					},
 				},
 			},
@@ -76,11 +80,13 @@ func (d *machineCoresDataSource) Configure(_ context.Context, req datasource.Con
 var coreSpeedAttrTypes = map[string]attr.Type{
 	"speed": types.Int64Type,
 	"fit":   types.Int64Type,
+	"model": types.StringType,
 }
 
 type coreSpeedModel struct {
-	Speed types.Int64 `tfsdk:"speed"`
-	Fit   types.Int64 `tfsdk:"fit"`
+	Speed types.Int64  `tfsdk:"speed"`
+	Fit   types.Int64  `tfsdk:"fit"`
+	Model types.String `tfsdk:"model"`
 }
 
 type machineCoresModel struct {
@@ -94,9 +100,14 @@ type machineCoresModel struct {
 func coreSpeedList(ctx context.Context, ss []client.CoreSpeedRoom) (types.List, error) {
 	rows := make([]coreSpeedModel, 0, len(ss))
 	for _, s := range ss {
+		model := types.StringNull()
+		if s.Model != "" {
+			model = types.StringValue(s.Model)
+		}
 		rows = append(rows, coreSpeedModel{
 			Speed: types.Int64Value(int64(s.SpeedMHz)),
 			Fit:   types.Int64Value(int64(s.Fit)),
+			Model: model,
 		})
 	}
 	list, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: coreSpeedAttrTypes}, rows)

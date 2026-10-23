@@ -128,6 +128,10 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 					"drops to their disk. Set it back to false to start the app again.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the app is running (false while stopped)."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 			"url": schema.StringAttribute{
 				Computed:    true,
 				Description: "The first HTTP port's public HTTPS URL, as reported by the platform.",
@@ -385,6 +389,7 @@ type containerAppModel struct {
 	Volume            types.List      `tfsdk:"volume"`
 	Stopped           types.Bool      `tfsdk:"stopped"`
 	Ready             types.Bool      `tfsdk:"ready"`
+	RunningCPUModel   types.String    `tfsdk:"running_cpu_model"`
 	URL               types.String    `tfsdk:"url"`
 	Endpoints         types.List      `tfsdk:"endpoints"`
 	PlacementStrategy types.String    `tfsdk:"placement_strategy"`
@@ -1152,6 +1157,7 @@ func settleAppSizes(ctx context.Context, c *client.Client, m *containerAppModel)
 func refreshAppStatus(ctx context.Context, c *client.Client, name string, m *containerAppModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, name)
+	m.RunningCPUModel = runningCPUModel(st)
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.URL = types.StringValue("")

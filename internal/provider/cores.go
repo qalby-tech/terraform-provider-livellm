@@ -16,10 +16,13 @@ import (
 	"github.com/qalby-tech/terraform-provider-livellm/internal/client"
 )
 
-// A machine's cores: shared (the default) or dedicated, every core reserved
-// on its server; with dedicated cores, on servers whose cores run at
+// A machine's cores: shared (the default) or dedicated, whole cores of its
+// server for it alone; with dedicated cores, on servers whose cores run at
 // different clock speeds, a speed asked for (core_speed, MHz) or kept on
-// mixed speeds (mixed_speeds). The platform keeps each when a save leaves it
+// mixed speeds (mixed_speeds). Shared cores aren't reserved and have no
+// clock. How many dedicated cores a server can give (in pairs where its
+// cores have 2 threads) is the platform's to judge: its refusal is shown as
+// it says it, never guessed at plan time. The platform keeps each when a save leaves it
 // out, clears it with false or 0, and drops core_speed and mixed_speeds on
 // shared cores; it holds only true and a clock, so absent reads as false and
 // 0. Where the cores are is the platform's (the machine's pin), never sent.
@@ -152,12 +155,12 @@ func sharedCoreErrors(dedicated, cfgMixed types.Bool, cfgSpeed types.Int64) [][3
 	var errs [][3]string
 	if known(cfgSpeed) && cfgSpeed.ValueInt64() > 0 {
 		errs = append(errs, [3]string{"core_speed", "core_speed is for dedicated cores",
-			"Shared cores run at whatever speed the server gives them. Set dedicated_cores = true to ask for " +
+			"Shared cores aren't reserved, so they have no clock. Set dedicated_cores = true to ask for " +
 				"cores of one speed, or leave core_speed out."})
 	}
 	if known(cfgMixed) && cfgMixed.ValueBool() {
 		errs = append(errs, [3]string{"mixed_speeds", "mixed_speeds is for dedicated cores",
-			"Shared cores may run at different speeds anyway. Set dedicated_cores = true, or leave mixed_speeds out."})
+			"Shared cores aren't reserved, so they have no clock. Set dedicated_cores = true, or leave mixed_speeds out."})
 	}
 	return errs
 }
@@ -193,18 +196,37 @@ func warnCoresNotKept(id string, planned vmResourceModel, sp map[string]any, dia
 			"The next refresh reads what the machine holds.", id, strings.Join(differ, ", ")))
 }
 
-// runningCores fills the clock of a running machine's cores from its status
-// row: null when the platform doesn't say (stopped, starting, servers that
-// list no speeds, a platform without dedicated cores).
+// runningCores fills the clock of a running machine's dedicated cores from
+// its status row, as the platform says it: the clock when they are all of
+// one speed (mixed false), mixed when they aren't; null when it says neither
+// (shared cores, which have no clock; stopped, starting, servers that list
+// no speeds, a platform without dedicated cores).
 func runningCores(st *client.WorkloadStatus) (speed types.Int64, mixed types.Bool) {
-	if st == nil || st.Cores == nil {
+	switch {
+	case st == nil || st.Cores == nil:
 		return types.Int64Null(), types.BoolNull()
-	}
-	if st.Cores.Mixed || st.Cores.SpeedMHz <= 0 {
+	case st.Cores.Mixed:
 		return types.Int64Null(), types.BoolValue(true)
+	case st.Cores.SpeedMHz > 0:
+		return types.Int64Value(int64(st.Cores.SpeedMHz)), types.BoolValue(false)
 	}
-	return types.Int64Value(int64(st.Cores.SpeedMHz)), types.BoolValue(false)
+	return types.Int64Null(), types.BoolNull()
 }
+
+// runningCPUModel is the CPU model of the server a running resource runs on
+// ("Intel Core i9-14900K"), shared or dedicated, from its status row; null
+// when the platform doesn't say (not running, a platform that names none).
+func runningCPUModel(st *client.WorkloadStatus) types.String {
+	if st == nil || st.Cores == nil || st.Cores.Model == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(st.Cores.Model)
+}
+
+// runningCPUModelDescription is running_cpu_model's description on every
+// kind with cores.
+const runningCPUModelDescription = "The CPU model of the server the running resource runs on, shared or " +
+	"dedicated cores (\"Intel Core i9-14900K\"). Null while it isn't running, and from a platform that doesn't say."
 
 // coresRefusals are the platform's answers when a machine's cores, or room
 // for any resource, can't be had, by its code (409, or 422 for
@@ -290,17 +312,19 @@ func vmCoreFloor(m vmResourceModel) int {
 }
 
 // dedicatedCoresAttribute is dedicated_cores on an app, a Desktop App, a
-// database, a browser and a Browser API: all of cpu reserved on its server
-// instead of shared cores (the default), a quarter of it reserved. Left out,
-// the resource keeps what it has (false on a new one); false makes them
-// shared.
+// database, a browser and a Browser API: whole cores of its server for it
+// alone, all of cpu, instead of shared cores (the default), a quarter of it
+// reserved. Left out, the resource keeps what it has (false on a new one);
+// false makes them shared.
 func dedicatedCoresAttribute(extra string) schema.BoolAttribute {
 	return schema.BoolAttribute{
 		Optional: true,
 		Computed: true,
-		Description: "All of cpu reserved on its server, instead of shared cores (the default): a quarter of cpu " +
-			"reserved, all of it usable, and slower when the server is busy." + extra + " Left out, it keeps what it has; " +
-			"false makes them shared.",
+		Description: "Whole cores of its server for it alone, all of cpu, instead of shared cores (the default): a " +
+			"quarter of cpu reserved, all of it usable, and slower when the server is busy. On servers whose cores have " +
+			"2 threads, dedicated cores come in pairs (2, 4, 6…), and the platform refuses another count at apply. A " +
+			"dedicated core counts as 2 of the plan's cores." + extra + " Left out, it keeps what it has; false makes " +
+			"them shared.",
 		PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
 	}
 }

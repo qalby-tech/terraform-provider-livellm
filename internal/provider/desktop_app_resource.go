@@ -105,6 +105,10 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Description: "Stop the desktop without deleting the app. The home folder is kept (keep_files) and only it is billed.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the desktop is up (false while stopped)."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
@@ -139,6 +143,7 @@ type desktopAppModel struct {
 	StorageGi         types.Int64    `tfsdk:"storage_gi"`
 	Stopped           types.Bool     `tfsdk:"stopped"`
 	Ready             types.Bool     `tfsdk:"ready"`
+	RunningCPUModel   types.String   `tfsdk:"running_cpu_model"`
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
@@ -223,6 +228,7 @@ func desktopBlock(w *client.Workload) map[string]any { return w.Desktop }
 func refreshDesktopStatus(ctx context.Context, c *client.Client, m *desktopAppModel) {
 	st, _ := statusOf(ctx, c, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+	m.RunningCPUModel = runningCPUModel(st)
 }
 
 // refreshDesktopSizes reads back the sizes the platform chose after a write.

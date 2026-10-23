@@ -152,6 +152,10 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.Bool{keepSizeWhenUnset{}},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the database is up."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 			"servers_desired": schema.Int64Attribute{
 				Computed:    true,
 				Description: "An object storage of 3 servers: how many servers it runs (3). Null for anything else.",
@@ -232,6 +236,7 @@ type storageModel struct {
 	AdminConsole      types.Bool          `tfsdk:"admin_console"`
 	Backup            *storageBackupModel `tfsdk:"backup"`
 	Ready             types.Bool          `tfsdk:"ready"`
+	RunningCPUModel   types.String        `tfsdk:"running_cpu_model"`
 	ServersDesired    types.Int64         `tfsdk:"servers_desired"`
 	ServersReady      types.Int64         `tfsdk:"servers_ready"`
 	Endpoints         types.List          `tfsdk:"endpoints"`
@@ -655,6 +660,7 @@ func refreshStorageStatus(ctx context.Context, c *client.Client, m *storageModel
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, m.Name.ValueString())
 	m.ServersDesired, m.ServersReady = types.Int64Null(), types.Int64Null()
+	m.RunningCPUModel = runningCPUModel(st)
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.Endpoints = types.ListValueMust(epType, []attr.Value{})

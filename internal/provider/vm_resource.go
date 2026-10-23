@@ -110,10 +110,12 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"dedicated_cores": schema.BoolAttribute{
 				Optional: true,
 				Computed: true,
-				Description: "Every core reserved for this machine on its server, instead of shared (the default), which may " +
-					"be slower when the server is busy. On servers whose cores run at different clock speeds, they are all " +
-					"of one speed (core_speed). Left out, the machine keeps what it has; false makes them shared. A change " +
-					"reaches a running machine at its next restart.",
+				Description: "Whole cores of its server for this machine alone, instead of shared (the default), which may " +
+					"be slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs " +
+					"(cpus 2, 4, 6…), and the platform refuses another count at apply. On servers whose cores run at " +
+					"different clock speeds, they are all of one speed (core_speed). A dedicated core counts as 2 of the " +
+					"plan's cores. Left out, the machine keeps what it has; false makes them shared. A change reaches a " +
+					"running machine at its next restart.",
 				PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
 			},
 			"core_speed": schema.Int64Attribute{
@@ -212,14 +214,19 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"url":   schema.StringAttribute{Computed: true, Description: "The first exposed HTTP port's public HTTPS URL."},
 			"running_core_speed": schema.Int64Attribute{
 				Computed: true,
-				Description: "The clock in MHz of the cores the running machine got, when they are all of one speed. Null " +
-					"while it isn't running, when they run at different speeds (running_mixed_speeds), and where the " +
-					"servers list no speeds.",
+				Description: "Dedicated cores only: the clock in MHz of the cores the running machine got, when they are " +
+					"all of one speed. Null on shared cores (they have no clock), while it isn't running, when they run at " +
+					"different speeds (running_mixed_speeds), and where the servers list no speeds.",
 			},
 			"running_mixed_speeds": schema.BoolAttribute{
 				Computed: true,
-				Description: "True when the running machine's cores run at different clock speeds, false when they are all " +
-					"of one speed (running_core_speed). Null while it isn't running and where the servers list no speeds.",
+				Description: "Dedicated cores only: true when the running machine's cores run at different clock speeds, " +
+					"false when they are all of one speed (running_core_speed). Null on shared cores (they have no clock), " +
+					"while it isn't running and where the servers list no speeds.",
+			},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
 			},
 			"endpoints": schema.ListNestedAttribute{
 				Computed:    true,
@@ -333,6 +340,7 @@ type vmResourceModel struct {
 	Ready             types.Bool     `tfsdk:"ready"`
 	RunningCoreSpeed  types.Int64    `tfsdk:"running_core_speed"`
 	RunningMixed      types.Bool     `tfsdk:"running_mixed_speeds"`
+	RunningCPUModel   types.String   `tfsdk:"running_cpu_model"`
 	SSH               types.String   `tfsdk:"ssh"`
 	URL               types.String   `tfsdk:"url"`
 	Endpoints         types.List     `tfsdk:"endpoints"`
@@ -642,6 +650,7 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, m.Name.ValueString())
 	m.RunningCoreSpeed, m.RunningMixed = runningCores(st)
+	m.RunningCPUModel = runningCPUModel(st)
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.SSH = types.StringValue("")

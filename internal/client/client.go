@@ -173,18 +173,21 @@ type WorkloadStatus struct {
 	// Servers: an object storage of 3 servers, how many it runs and how many
 	// are ready (absent for anything else).
 	Servers *ServerCount `json:"servers,omitempty"`
-	// Cores: a running machine, the clock of the cores it got (absent where
-	// the servers list no speeds, and from a platform without dedicated
-	// cores).
+	// Cores: a running resource's cores, the CPU model of the server it runs
+	// on and, with dedicated cores, the clock they got (absent while it isn't
+	// running, and from a platform without dedicated cores).
 	Cores *CoreStatus `json:"cores,omitempty"`
 }
 
-// CoreStatus is the clock of a running machine's cores: SpeedMHz when they
-// are all of one speed, else Mixed, with the platform's words.
+// CoreStatus is a running resource's cores: Model, the CPU of the server it
+// runs on ("Intel Core i9-14900K"), shared or dedicated; and with dedicated
+// cores only, SpeedMHz when they are all of one speed, else Mixed with the
+// platform's words. Shared cores have no clock: neither is set for them.
 type CoreStatus struct {
 	SpeedMHz int    `json:"speedMHz,omitempty"`
 	Mixed    bool   `json:"mixed,omitempty"`
 	Message  string `json:"message,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // ServerCount is an object storage cluster's servers: desired and ready.
@@ -307,11 +310,14 @@ func (c *Client) FleetHosts(ctx context.Context) ([]Host, error) {
 	return out.Hosts, nil
 }
 
-// CoreSpeedRoom is one of the servers' clock speeds and the most cores of it
-// a new machine with dedicated cores can get on one server.
+// CoreSpeedRoom is one of the servers' clock speeds, the CPU model of the
+// servers that have it, and the most cores of it a new machine with
+// dedicated cores can get on one server (whole cores: on servers whose cores
+// have 2 threads, an even count).
 type CoreSpeedRoom struct {
-	SpeedMHz int `json:"speedMHz"`
-	Fit      int `json:"fit"`
+	SpeedMHz int    `json:"speedMHz"`
+	Fit      int    `json:"fit"`
+	Model    string `json:"model,omitempty"`
 }
 
 // MachineCores is what a new machine with dedicated cores can get (GET

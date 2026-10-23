@@ -179,6 +179,10 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					"browser made before profiles existed turns it on at its next restart.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the browser is up."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
@@ -343,6 +347,7 @@ type browserModel struct {
 	Proxy             types.Object   `tfsdk:"proxy"`
 	ProfilesReady     types.Bool     `tfsdk:"profiles_ready"`
 	Ready             types.Bool     `tfsdk:"ready"`
+	RunningCPUModel   types.String   `tfsdk:"running_cpu_model"`
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
@@ -1104,6 +1109,7 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 	}
 	st, _ := statusOf(ctx, r.data.Client, plan.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+	m.RunningCPUModel = runningCPUModel(st)
 	m.ProfilesReady = profilesReady(fromSpec, st)
 	if m.Languages.IsUnknown() {
 		m.Languages = types.ListNull(types.StringType)
@@ -1193,6 +1199,7 @@ func (r *browserResource) Read(ctx context.Context, req resource.ReadRequest, re
 	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	st, _ := statusOf(ctx, r.data.Client, state.Name.ValueString())
 	state.Ready = types.BoolValue(st != nil && st.Ready)
+	state.RunningCPUModel = runningCPUModel(st)
 	var fromSpec *bool
 	if b, ok := w.Browser["profilesReady"].(bool); ok {
 		fromSpec = &b

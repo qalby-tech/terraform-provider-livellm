@@ -48,9 +48,17 @@ func TestCoreAttributes(t *testing.T) {
 	if _, ok := speed.PlanModifiers[0].(keepCoreChoice); !ok {
 		t.Errorf("core_speed: plan modifier %T", speed.PlanModifiers[0])
 	}
-	for _, a := range []string{"running_core_speed", "running_mixed_speeds"} {
+	for _, a := range []string{"running_core_speed", "running_mixed_speeds", "running_cpu_model"} {
 		if v := resp.Schema.Attributes[a]; v == nil || !v.IsComputed() || v.IsOptional() || v.IsRequired() {
 			t.Errorf("%s: %+v, want computed only", a, v)
+		}
+	}
+	// The clock and the mixed speeds are dedicated cores' only: shared cores
+	// have no clock.
+	for _, a := range []string{"running_core_speed", "running_mixed_speeds"} {
+		if d := resp.Schema.Attributes[a].GetDescription(); !strings.HasPrefix(d, "Dedicated cores only") ||
+			!strings.Contains(d, "Null on shared cores") {
+			t.Errorf("%s: %q", a, d)
 		}
 	}
 	for _, a := range resp.Schema.Attributes {
@@ -260,9 +268,17 @@ func TestVMModifyPlanCores(t *testing.T) {
 // to dedicated_cores = false.
 func TestSharedCoreErrors(t *testing.T) {
 	f, tr := types.BoolValue(false), types.BoolValue(true)
-	if errs := sharedCoreErrors(f, tr, types.Int64Value(5700)); len(errs) != 2 ||
-		errs[0][0] != "core_speed" || errs[1][0] != "mixed_speeds" {
-		t.Errorf("shared with both: %v", errs)
+	errs := sharedCoreErrors(f, tr, types.Int64Value(5700))
+	if len(errs) != 2 || errs[0][0] != "core_speed" || errs[1][0] != "mixed_speeds" {
+		t.Fatalf("shared with both: %v", errs)
+	}
+	// Shared cores have no clock: never said to run at a speed, or at mixed
+	// ones.
+	for _, e := range errs {
+		if !strings.Contains(e[2], "Shared cores aren't reserved, so they have no clock.") ||
+			strings.Contains(e[2], "different speeds") || strings.Contains(e[2], "whatever speed") {
+			t.Errorf("%s: %q", e[0], e[2])
+		}
 	}
 	for name, c := range map[string]struct {
 		dedicated, mixed types.Bool
@@ -396,6 +412,32 @@ func TestCoresRefusals(t *testing.T) {
 			t.Errorf("%s: detail %q", c.summary, d)
 		}
 	}
+	// Dedicated cores in pairs, and any other 422, are the platform's to
+	// judge: its words as it says them, never a cores refusal's advice nor a
+	// count the provider made up.
+	for _, body := range []string{
+		`{"error":"Dedicated cores come in pairs on these servers: use 8 or 10.","code":"dedicated_pairs","workload":"ws","cores":9}`,
+		`{"error":"Dedicated cores come in pairs on these servers: use 8 or 10."}`,
+	} {
+		var diags diag.Diagnostics
+		apiDiag(&diags, "Cannot create VM", &client.APIError{Status: 422, Body: body})
+		if len(diags) != 1 || diags[0].Summary() != "Cannot create VM" ||
+			diags[0].Detail() != "Cannot create VM: Dedicated cores come in pairs on these servers: use 8 or 10." {
+			t.Errorf("pairs %s: %v", body, diags)
+		}
+		diags = nil
+		vmAPIDiag(&diags, "Cannot update VM", &client.APIError{Status: 422, Body: body},
+			vmResourceModel{OS: types.StringValue("ubuntu"), Desktop: types.BoolValue(false)})
+		if len(diags) != 1 || diags[0].Detail() != "Cannot update VM: Dedicated cores come in pairs on these servers: use 8 or 10." {
+			t.Errorf("pairs, a machine's write %s: %v", body, diags)
+		}
+	}
+	// A 422 that isn't JSON keeps the answer as it came.
+	var plain diag.Diagnostics
+	apiDiag(&plain, "Cannot create VM", &client.APIError{Status: 422, Body: "unprocessable"})
+	if len(plain) != 1 || !strings.Contains(plain[0].Detail(), "unprocessable") {
+		t.Errorf("plain 422: %v", plain)
+	}
 	// Another conflict, or a code on another status, is shown as it was.
 	for _, e := range []*client.APIError{
 		{Status: 409, Body: `{"error":"a name taken","code":"name_taken"}`},
@@ -476,28 +518,46 @@ func TestCoresRefusalsMachineFloor(t *testing.T) {
 	}
 }
 
-// The status's cores: the clock of one speed, or mixed; nothing when the
-// platform doesn't say.
+// The status's cores: dedicated cores' clock of one speed, or mixed; the
+// server's CPU model on any running resource; nothing the platform doesn't
+// say. Shared cores carry the model alone and read no clock and no mixed
+// speeds (never mixed for want of a clock).
 func TestRunningCores(t *testing.T) {
+	const i9 = "Intel Core i9-14900K"
 	for _, c := range []struct {
 		st    *client.WorkloadStatus
 		speed types.Int64
 		mixed types.Bool
+		model types.String
 	}{
-		{nil, types.Int64Null(), types.BoolNull()},
-		{&client.WorkloadStatus{}, types.Int64Null(), types.BoolNull()},
-		{&client.WorkloadStatus{Cores: &client.CoreStatus{SpeedMHz: 5700}}, types.Int64Value(5700), types.BoolValue(false)},
-		{&client.WorkloadStatus{Cores: &client.CoreStatus{Mixed: true, Message: "Mixed core speeds"}}, types.Int64Null(), types.BoolValue(true)},
+		{nil, types.Int64Null(), types.BoolNull(), types.StringNull()},
+		{&client.WorkloadStatus{}, types.Int64Null(), types.BoolNull(), types.StringNull()},
+		{&client.WorkloadStatus{Cores: &client.CoreStatus{SpeedMHz: 5700}}, types.Int64Value(5700), types.BoolValue(false), types.StringNull()},
+		{&client.WorkloadStatus{Cores: &client.CoreStatus{SpeedMHz: 5700, Model: i9}}, types.Int64Value(5700), types.BoolValue(false), types.StringValue(i9)},
+		{&client.WorkloadStatus{Cores: &client.CoreStatus{Mixed: true, Message: "Mixed core speeds"}}, types.Int64Null(), types.BoolValue(true), types.StringNull()},
+		{&client.WorkloadStatus{Cores: &client.CoreStatus{Mixed: true, Message: "Mixed core speeds", Model: i9}}, types.Int64Null(), types.BoolValue(true), types.StringValue(i9)},
+		// Shared cores: the model, no clock.
+		{&client.WorkloadStatus{Cores: &client.CoreStatus{Model: i9}}, types.Int64Null(), types.BoolNull(), types.StringValue(i9)},
+		{&client.WorkloadStatus{Cores: &client.CoreStatus{}}, types.Int64Null(), types.BoolNull(), types.StringNull()},
 	} {
 		speed, mixed := runningCores(c.st)
 		if !speed.Equal(c.speed) || !mixed.Equal(c.mixed) {
 			t.Errorf("%+v: %v %v, want %v %v", c.st, speed, mixed, c.speed, c.mixed)
 		}
+		if got := runningCPUModel(c.st); !got.Equal(c.model) {
+			t.Errorf("%+v: model %v, want %v", c.st, got, c.model)
+		}
 	}
 	m, d := vmModelFrom(context.Background(), client.WorkloadStatus{ID: "box", Type: "vm-ubuntu", Ready: true,
-		Cores: &client.CoreStatus{SpeedMHz: 4400}})
-	if d.HasError() || !m.RunningCoreSpeed.Equal(types.Int64Value(4400)) || !m.RunningMixed.Equal(types.BoolValue(false)) {
-		t.Errorf("data source: %v %v %v", m.RunningCoreSpeed, m.RunningMixed, d)
+		Cores: &client.CoreStatus{SpeedMHz: 4400, Model: i9}})
+	if d.HasError() || !m.RunningCoreSpeed.Equal(types.Int64Value(4400)) || !m.RunningMixed.Equal(types.BoolValue(false)) ||
+		!m.RunningCPUModel.Equal(types.StringValue(i9)) {
+		t.Errorf("data source: %v %v %v %v", m.RunningCoreSpeed, m.RunningMixed, m.RunningCPUModel, d)
+	}
+	m, d = vmModelFrom(context.Background(), client.WorkloadStatus{ID: "box", Type: "vm-ubuntu", Ready: true,
+		Cores: &client.CoreStatus{Model: i9}})
+	if d.HasError() || !m.RunningCoreSpeed.IsNull() || !m.RunningMixed.IsNull() || !m.RunningCPUModel.Equal(types.StringValue(i9)) {
+		t.Errorf("data source, shared: %v %v %v %v", m.RunningCoreSpeed, m.RunningMixed, m.RunningCPUModel, d)
 	}
 }
 
@@ -528,7 +588,7 @@ func TestVMReadCores(t *testing.T) {
 	r := NewVMResource()
 	r.(resource.ResourceWithConfigure).Configure(ctx, resource.ConfigureRequest{
 		ProviderData: &providerData{Client: coresPlatform(t, w,
-			`{"id":"box","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"speedMHz":5700}}`)},
+			`{"id":"box","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"speedMHz":5700,"model":"Intel Core i9-14900K"}}`)},
 	}, &resource.ConfigureResponse{})
 	var sr resource.SchemaResponse
 	r.Schema(ctx, resource.SchemaRequest{}, &sr)
@@ -545,8 +605,9 @@ func TestVMReadCores(t *testing.T) {
 		!m.MixedSpeeds.Equal(types.BoolValue(false)) {
 		t.Errorf("settings: %v %v %v", m.DedicatedCores, m.CoreSpeed, m.MixedSpeeds)
 	}
-	if !m.RunningCoreSpeed.Equal(types.Int64Value(5700)) || !m.RunningMixed.Equal(types.BoolValue(false)) {
-		t.Errorf("running: %v %v", m.RunningCoreSpeed, m.RunningMixed)
+	if !m.RunningCoreSpeed.Equal(types.Int64Value(5700)) || !m.RunningMixed.Equal(types.BoolValue(false)) ||
+		!m.RunningCPUModel.Equal(types.StringValue("Intel Core i9-14900K")) {
+		t.Errorf("running: %v %v %v", m.RunningCoreSpeed, m.RunningMixed, m.RunningCPUModel)
 	}
 }
 

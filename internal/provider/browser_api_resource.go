@@ -81,6 +81,10 @@ func (r *browserAPIResource) Schema(ctx context.Context, _ resource.SchemaReques
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the Browser API is up."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
@@ -160,6 +164,7 @@ type browserAPIModel struct {
 	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
 	Memory            types.String   `tfsdk:"memory"`
 	Ready             types.Bool     `tfsdk:"ready"`
+	RunningCPUModel   types.String   `tfsdk:"running_cpu_model"`
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
@@ -444,6 +449,7 @@ func (r *browserAPIResource) waitAndRefresh(ctx context.Context, m *browserAPIMo
 	}
 	st, _ := statusOf(ctx, r.data.Client, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+	m.RunningCPUModel = runningCPUModel(st)
 	var sp map[string]any
 	if w := fetchWorkload(ctx, r.data.Client, m.Name.ValueString()); w != nil {
 		sp = w.Controller
@@ -495,6 +501,7 @@ func (r *browserAPIResource) Read(ctx context.Context, req resource.ReadRequest,
 	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	st, _ := statusOf(ctx, r.data.Client, state.Name.ValueString())
 	state.Ready = types.BoolValue(st != nil && st.Ready)
+	state.RunningCPUModel = runningCPUModel(st)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
