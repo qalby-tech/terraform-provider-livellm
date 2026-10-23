@@ -626,7 +626,7 @@ func storageConfigErrors(m storageModel) [][2]string {
 		}
 		if m.DedicatedCores.ValueBool() {
 			errs = append(errs, [2]string{"Object storage has no dedicated cores",
-				"Dedicated cores are for Postgres, Redis and the other resources that run as pods. Remove dedicated_cores."})
+				"Dedicated cores are for Postgres and Redis; an object storage has none. Remove dedicated_cores."})
 		}
 		if v := m.Version; !v.IsUnknown() && !v.IsNull() && v.ValueString() != "1" {
 			errs = append(errs, [2]string{"Object storage runs version 1",

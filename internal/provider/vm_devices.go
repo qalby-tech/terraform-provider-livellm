@@ -196,7 +196,9 @@ func timeZoneChange(plan, state vmResourceModel) *[2]string {
 	}
 	return &[2]string{"A machine's time zone is set when it is made",
 		fmt.Sprintf("%s takes its time zone when it is made; after that the zone is the machine's own: change it on "+
-			"the machine itself, and %s here.", plan.Name.ValueString(), keep)}
+			"the machine itself, and %s here. To make the machine anew in another zone, taint it first "+
+			"(tofu taint or terraform taint) or rename it: -replace alone is refused while time_zone differs.",
+			plan.Name.ValueString(), keep)}
 }
 
 // settleVMTimeZone resolves a time zone a write left unknown from the

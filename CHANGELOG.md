@@ -19,7 +19,9 @@
   `Europe/Moscow`; left out, the cluster's zone, else UTC). After that the
   zone is the machine's own: another value on an existing machine is an error
   at plan time ("A machine's time zone is set when it is made"), never a
-  replacement, and leaving it out keeps the machine as it is. Every write
+  replacement, and leaving it out keeps the machine as it is. To make a
+  machine anew in another zone, taint it (or rename it) first: `-replace`
+  alone is refused while the zone differs. Every write
   sends the zone state holds, and a refresh keeps it when the platform has
   forgotten it (a save that leaves it out, such as the console's, does that),
   so a console edit doesn't turn the configured zone into a refused change.
@@ -95,9 +97,11 @@
 - Needs LiveLLM API 0.78 or newer for all of it (dedicated cores on
   machines from 0.77). An older API ignores what it
   doesn't know: the apply warns ("Cores not kept as written", "Devices not
-  kept as written", "Port groups not kept as written", "Time zone not kept
-  as written"), the cores stay shared, and the next plan shows the
-  difference; nothing changes for a resource that doesn't ask for them.
+  kept as written", "Port groups not kept as written"), the cores stay
+  shared, and the next plan shows the difference. A time zone it ignores
+  warns too ("Time zone not kept as written"): the machine runs on the
+  cluster's zone, state keeps the configured one, and the plan stays clean.
+  Nothing changes for a resource that doesn't ask for any of them.
 
 ## 0.18.0
 
