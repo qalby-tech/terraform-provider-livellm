@@ -1,7 +1,48 @@
 # Changelog
 
-## Unreleased
+## 0.19.0
 
+- **Devices.** `livellm_vm` takes `devices`: the cluster's devices by id (a
+  GPU, a USB controller), each passed through to the machine, which then stays
+  on the server that has it. A device is one machine's at a time, and a change
+  reaches a running machine at its next restart. Optional and computed: left
+  out, a machine keeps what it has, the console's choice included; `[]`
+  removes them. A device the platform can't give (another machine has it, it
+  isn't offered to the workspace, the cluster has no such id) is refused at
+  apply in the platform's words; listing one twice or more than 8 is an error
+  at plan time.
+- The `livellm_machine_devices` data source: the devices a machine of the
+  workspace may be given (`id`, `label`, `kind`), how many the cluster has
+  (`total`), how many no machine has (`free`) and this workspace's machines
+  that have each (`machines`).
+- **A time zone when a machine is made.** `time_zone` (an IANA name such as
+  `Europe/Moscow`; left out, the cluster's zone, else UTC). After that the
+  zone is the machine's own: another value on an existing machine is an error
+  at plan time ("A machine's time zone is set when it is made"), never a
+  replacement, and leaving it out keeps the machine as it is. Every write
+  sends the zone state holds, so the platform keeps it.
+- **Port groups.** `port_groups`: ports published together on the server's
+  address, the host in `ssh`. A group keeps its ports' numbers inside the
+  machine and publishes each at its number plus the group's `offset`, which
+  the platform picks when the group is first saved and keeps for its life, so
+  the gaps between them stay (Moonlight: `<host>:<47989 + offset>`). A
+  mirrored group is `count` numbers the platform picks, the same inside and
+  out (FTP's passive range), read back in its `ports`. `allow_cidrs` limits
+  who may connect. Optional and computed: left out, a machine keeps its
+  groups; `[]` removes them; a group keeps its offset however the list is
+  reordered. A mirrored group without `count` or with `ports`, a group
+  without ports or a name, a name used twice, `count` or group-level
+  `tcp`/`udp` on a group that isn't mirrored, and a number that SSH or another
+  group has are errors at plan time; where the numbers can't be published,
+  the platform says so at apply.
+- **A machine's names inside the workspace**, in the docs: `<workspace>-<name>`
+  (SSH and its `tcp` and `udp` ports) and `<workspace>-<name>-host`, the
+  machine itself on every port, TCP and UDP. The platform refuses another
+  resource named `<machine>-host`, `-http`, `-internal` or `-rdp` next to the
+  machine.
+- A refresh and an import read `devices`, `time_zone` and `port_groups`. A
+  write never carries what the platform decides about a machine: the machine
+  type it first ran on, its disk kind, its cores' place.
 - **Shared or dedicated cores on apps, Desktop Apps, databases, browsers and
   Browser APIs.** `livellm_container_app`, `livellm_desktop_app`,
   `livellm_storage` (Postgres and Redis), `livellm_browser` and
@@ -49,9 +90,12 @@
   `false` and `speeds` empty. On an API without dedicated cores the read
   fails ("Cannot read the cores").
 - `cpus` is described in cores (a core is one host thread).
-- Needs a LiveLLM API with dedicated cores. An older one ignores the three
-  settings: the apply warns ("Cores not kept as written") and the cores stay
-  shared; nothing changes for a machine that doesn't ask for them.
+- Needs LiveLLM API 0.78 or newer for all of it (dedicated cores on
+  machines from 0.77). An older API ignores what it
+  doesn't know: the apply warns ("Cores not kept as written", "Devices not
+  kept as written", "Port groups not kept as written", "Time zone not kept
+  as written"), the cores stay shared, and the next plan shows the
+  difference; nothing changes for a resource that doesn't ask for them.
 
 ## 0.18.0
 

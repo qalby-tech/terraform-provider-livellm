@@ -46,7 +46,7 @@ configuration; keys are secrets.
 
 | Resource | What it creates |
 |---|---|
-| [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, the databases it reaches, dedicated cores |
+| [`livellm_vm`](resources/vm.md) | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, port groups, a stop time, the databases it reaches, dedicated cores, devices (a GPU, a USB controller) |
 | [`livellm_container_app`](resources/container_app.md) | Container app from an image or a Git repo the platform builds |
 | [`livellm_storage`](resources/storage.md) | Managed Postgres, Redis or object storage (S3), backups, admin console, external access |
 | [`livellm_browser`](resources/browser.md) | A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |
@@ -56,7 +56,8 @@ configuration; keys are secrets.
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md),
 [`livellm_hosts`](data-sources/hosts.md),
-[`livellm_machine_cores`](data-sources/machine_cores.md).
+[`livellm_machine_cores`](data-sources/machine_cores.md),
+[`livellm_machine_devices`](data-sources/machine_devices.md).
 
 Every resource can say where it runs with `placement_strategy`,
 `placement_region` and `placement_host`. Left out, LiveLLM picks the host (the
@@ -91,6 +92,12 @@ A database has no `reachable_from`: it is reached only by what links it, an
 app's `database` block (with or without variables) or `starts_after`, and a
 `database` block on a machine or a Desktop App. A link without variables is
 reach only: it puts nothing into the app or machine and never restarts it.
+
+A machine answers inside the workspace at `<workspace>-<name>` (SSH and its
+`tcp` and `udp` ports) and at `<workspace>-<name>-host`, the machine itself on
+every port, TCP and UDP; the platform refuses another resource named
+`<machine>-host`, `-http`, `-internal` or `-rdp` next to the machine (see
+[`livellm_vm`](resources/vm.md)).
 
 A caller that is let in reaches every port of the resource. Public addresses
 keep their own settings: `allow_cidrs`, `allowlist` and public ports open

@@ -269,7 +269,8 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 						"internal": schema.BoolAttribute{
 							Optional: true,
 							Description: "No public address and no node port: the port is only an address inside the workspace, " +
-								"<workspace>-<name>-internal:<port>, for the resources reachable_from lets in.",
+								"<workspace>-<name>-internal:<port> (and, as every port of the machine, <workspace>-<name>-host:<port>), " +
+								"for the resources reachable_from lets in.",
 						},
 					},
 				},

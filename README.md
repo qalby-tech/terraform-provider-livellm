@@ -57,7 +57,7 @@ Manage the core of a workspace as code today:
 
 | Resource | What it creates |
 |---|---|
-| `livellm_vm` | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, the databases it reaches, dedicated cores |
+| `livellm_vm` | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, port groups, a stop time, the databases it reaches, dedicated cores, devices (a GPU, a USB controller) |
 | `livellm_container_app` | An app from an image or a Git repo the platform builds — one service of a Composable App (`stack`, `hostname`, `starts_after`), linked to its databases (`database`), HTTP, raw TCP/UDP and internal ports, volumes, stop and start |
 | `livellm_storage` | Managed Postgres, Redis or object storage (S3), backups, admin console, external access |
 | `livellm_browser` | A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |
@@ -65,7 +65,7 @@ Manage the core of a workspace as code today:
 | `livellm_desktop_app` | A Linux desktop in a container that starts in seconds, one for each agent or task |
 
 Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`, `livellm_hosts`,
-`livellm_machine_cores`.
+`livellm_machine_cores`, `livellm_machine_devices`.
 
 Every resource can say where it runs (`placement_strategy`, `placement_region`,
 `placement_host`): left out, LiveLLM picks the host; a region runs it on any of

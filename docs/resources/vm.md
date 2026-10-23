@@ -1,7 +1,7 @@
 ---
 page_title: "livellm_vm Resource - livellm"
 description: |-
-  A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server — with ports, a stop time, placement and dedicated cores.
+  A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server — with ports, a stop time, placement, dedicated cores, devices and port groups.
 ---
 
 # livellm_vm (Resource)
@@ -216,6 +216,113 @@ may run on when it is new, started, grown or moved, else the apply stops with
 room for this machine."): stop or shrink another resource, or give this one
 fewer cores or less memory.
 
+With a graphics card or a USB controller of the cluster's: `devices` names
+them by id; [`livellm_machine_devices`](../data-sources/machine_devices.md)
+lists them, with how many are free. Each is passed through to the machine,
+which then stays on the server that has it, and a device is one machine's at
+a time. A change reaches a running machine at its next restart. Left out,
+the machine keeps what it has, the console's choice included;
+`devices = []` removes them:
+
+```terraform
+resource "livellm_vm" "studio" {
+  name      = "studio"
+  os        = "windows"
+  cpus      = 8
+  memory_gi = 32
+  disk_gi   = 128
+  # …credentials…
+
+  devices   = ["rtx5090"]
+  time_zone = "Europe/Moscow"
+}
+```
+
+A device the platform can't give is refused at apply in its words: one
+another machine has ("NVIDIA RTX 5090 is in use by another machine (1 in the
+cluster)."), one not offered to the workspace, or an id the cluster doesn't
+have.
+
+`time_zone` (an IANA name) is the machine's zone when it is made; left out,
+the cluster's zone, else UTC. After that the zone is the machine's own: change
+it on the machine itself. Another `time_zone` on an existing machine is an
+error at plan time, never a replacement; leaving it out keeps the machine as
+it is.
+
+Ports published together, on the server's address (the host in `ssh`):
+`port_groups`. A group keeps its ports' numbers inside the machine and
+publishes each at its number plus the group's `offset`, which the platform
+picks when the group is first saved and keeps for its life, so the gaps
+between them stay: Moonlight works its ports out from one, so add the machine
+in Moonlight as `<host>:<47989 + offset>`. A mirrored group is `count` numbers
+the platform picks, the same inside and out (FTP's passive range): read them
+from its `ports`. A group is open to any address unless its `allow_cidrs`
+names some:
+
+```terraform
+resource "livellm_vm" "studio" {
+  name = "studio"
+  # …
+
+  port_groups = [
+    {
+      name        = "moonlight"
+      allow_cidrs = ["203.0.113.0/24"]
+      ports = [
+        { port = 47984 }, { port = 47989 }, { port = 48010, tcp = true, udp = true },
+        { port = 47998, udp = true }, { port = 47999, udp = true }, { port = 48000, udp = true },
+      ]
+    },
+    { name = "ftp", mirrored = true, count = 10 },
+  ]
+}
+
+output "moonlight" {
+  # The address to add in Moonlight.
+  value = "${split(":", livellm_vm.studio.ssh)[0]}:${47989 + livellm_vm.studio.port_groups[0].offset}"
+}
+
+output "ftp_passive_ports" {
+  value = [for p in livellm_vm.studio.port_groups[1].ports : p.port]
+}
+```
+
+Left out, the machine keeps the groups it has, the console's included;
+`port_groups = []` removes them. A port added to a group later is refused
+when the group's offset can't take it (the number it would be published at
+is taken): remove the group and add it again for a new offset. A machine
+publishes at most 64 ports, SSH and its groups included.
+
+Inside the workspace a machine answers at `<workspace>-<name>` (SSH and its
+`tcp` and `udp` ports) and at `<workspace>-<name>-host`, the machine itself on
+every port, TCP and UDP, for the resources `reachable_from` lets in; an
+`internal` port also answers at `<workspace>-<name>-internal:<port>`. The
+workspace's name is the [`livellm_workspace`](../data-sources/workspace.md)
+data source's:
+
+```terraform
+data "livellm_workspace" "this" {}
+
+resource "livellm_vm" "db" {
+  name = "db-box"
+  # …credentials…
+
+  reachable_from = [livellm_container_app.api.name]
+}
+
+resource "livellm_container_app" "api" {
+  name  = "api"
+  image = "ghcr.io/acme/api:1.4"
+  env = {
+    DB_HOST = "${data.livellm_workspace.this.name}-db-box-host"
+  }
+}
+```
+
+Those names are the machine's: the platform refuses another resource named
+`<machine>-host`, `<machine>-http`, `<machine>-internal` or `<machine>-rdp`
+next to it.
+
 ## Schema
 
 ### Required
@@ -236,6 +343,16 @@ fewer cores or less memory.
 - `dedicated_cores` (Boolean) Every core reserved for this machine on its server, instead of shared (the default). On servers whose cores run at different clock speeds, they are all of one speed. Left out, the machine keeps what it has (`false` on a new machine); `false` makes them shared. A change reaches a running machine at its next restart. See [the example](#example-usage) for the refusals.
 - `core_speed` (Number) With `dedicated_cores`, where the servers' cores run at different clock speeds: the clock in MHz of the cores to get (`5700` for 5.7 GHz), one of the servers' speeds (the [`livellm_machine_cores`](../data-sources/machine_cores.md) data source lists them). `0` (the default): any cores of one speed. Left out, the machine keeps what it has. A speed above `0` is refused at plan time on shared cores.
 - `mixed_speeds` (Boolean) With `dedicated_cores`: keep this many cores although no single clock speed has that many free, so they may run at different speeds (the console's Continue with mixed speeds). Left out, the machine keeps what it has (`false` on a new machine); `false` asks for cores of one speed again. Refused at plan time on shared cores.
+- `devices` (List of String, at most 8) The cluster's devices this machine has, by id: a GPU, a USB controller (the [`livellm_machine_devices`](../data-sources/machine_devices.md) data source lists them). Each is passed through to the machine, which then stays on the server that has it; a device is one machine's at a time. A change reaches a running machine at its next restart. Left out, the machine keeps what it has (none on a new machine); `[]` removes them.
+- `time_zone` (String) The machine's time zone when it is made, an IANA name such as `Europe/Moscow`. Left out: the cluster's zone, else UTC. After that the zone is the machine's own to change on the machine itself: another value on an existing machine is refused at plan time.
+- `port_groups` (List of Object, at most 8) Ports published together on the server's address (the host in `ssh`); see [the example](#example-usage). Left out, the machine keeps the groups it has (none on a new machine); `[]` removes them.
+  - `name` (String, Required in a group) Lowercase letters, digits and hyphens, at most 15, unique on the machine.
+  - `mirrored` (Boolean) Published at the same numbers as inside, which the platform picks: set `count` and leave `ports` out. Defaults to `false`.
+  - `count` (Number) A mirrored group's size, `1`..`64`.
+  - `tcp`, `udp` (Boolean) A mirrored group's protocols (neither: TCP).
+  - `allow_cidrs` (List of String) Who may connect; left out or empty: any address.
+  - `ports` (List of Object, at most 64) The group's numbers inside the machine, each `port` (Number, Required in a port) with `tcp` and `udp` (Boolean; neither: TCP). A mirrored group's are the platform's: read them here.
+  - `offset` (Number, Read-only) Each port is published at its number plus `offset`, which the platform picks when the group is first saved and keeps for its life (`0` for a mirrored group).
 - `ssh_keys` (List of String) SSH public keys for this machine alone, one `.pub` line each. They are installed for `username` next to the workspace's own keys (set on the console's Keys page), and a change reaches a running machine within a minute or two. On Windows they open SSH, with PowerShell as its shell. Leave it out to keep whatever the machine has. The platform keeps a machine's last keys, so replace a key rather than emptying the list — an empty list is refused at plan time.
 - `stopped` (Boolean) Halt the VM without destroying it — the disk is kept and billing drops to disk-only.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
@@ -255,7 +372,7 @@ fewer cores or less memory.
   - `port` (Number, Required) Listener port inside the VM.
   - `tcp` (Boolean) Expose as a raw TCP address instead of HTTPS.
   - `udp` (Boolean) Expose as a raw UDP address.
-  - `internal` (Boolean) No public address and no node port: the port is only an address inside the workspace, `<workspace>-<name>-internal:<port>`, for the resources `reachable_from` lets in.
+  - `internal` (Boolean) No public address and no node port: the port is only an address inside the workspace, `<workspace>-<name>-internal:<port>` (and, as every port of the machine, `<workspace>-<name>-host:<port>`), for the resources `reachable_from` lets in.
 
 ### Read-Only
 
@@ -272,3 +389,5 @@ fewer cores or less memory.
 ```shell
 terraform import livellm_vm.dev dev-box
 ```
+
+Import reads the machine's sizes, cores, devices, time zone and port groups.
