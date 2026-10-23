@@ -20,7 +20,9 @@
   zone is the machine's own: another value on an existing machine is an error
   at plan time ("A machine's time zone is set when it is made"), never a
   replacement, and leaving it out keeps the machine as it is. Every write
-  sends the zone state holds, so the platform keeps it.
+  sends the zone state holds, and a refresh keeps it when the platform has
+  forgotten it (a save that leaves it out, such as the console's, does that),
+  so a console edit doesn't turn the configured zone into a refused change.
 - **Port groups.** `port_groups`: ports published together on the server's
   address, the host in `ssh`. A group keeps its ports' numbers inside the
   machine and publishes each at its number plus the group's `offset`, which

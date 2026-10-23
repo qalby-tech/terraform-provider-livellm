@@ -158,6 +158,19 @@ func readVMTimeZone(sp map[string]any) types.String {
 	return types.StringNull()
 }
 
+// refreshVMTimeZone is the time zone a refresh reads: the platform's, or the
+// one state holds when the platform holds none. A save that leaves the zone
+// out (the console's, for one) makes the platform forget it, while the
+// machine keeps the zone it was made with; reading that as none would turn
+// the configuration's zone into a change that is refused. The next write
+// sends it back.
+func refreshVMTimeZone(prior types.String, sp map[string]any) types.String {
+	if held := readVMTimeZone(sp); !held.IsNull() || !known(prior) {
+		return held
+	}
+	return prior
+}
+
 // vmTimeZoneSpec adds the machine's time zone to every write that has one, so
 // the platform keeps it.
 func vmTimeZoneSpec(m vmResourceModel, spec map[string]any) {

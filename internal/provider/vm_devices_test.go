@@ -350,3 +350,21 @@ func TestMachineDevicesDataSource(t *testing.T) {
 		t.Errorf("404: %v", resp.Diagnostics)
 	}
 }
+
+// A refresh keeps the zone state holds when the platform forgot it (a save
+// that left it out); an import reads the platform's.
+func TestRefreshVMTimeZone(t *testing.T) {
+	msk := types.StringValue("Europe/Moscow")
+	if got := refreshVMTimeZone(msk, map[string]any{}); !got.Equal(msk) {
+		t.Errorf("forgotten: %v", got)
+	}
+	if got := refreshVMTimeZone(msk, map[string]any{"timeZone": "UTC"}); got.ValueString() != "UTC" {
+		t.Errorf("changed elsewhere: %v", got)
+	}
+	if got := refreshVMTimeZone(types.StringNull(), map[string]any{"timeZone": "UTC"}); got.ValueString() != "UTC" {
+		t.Errorf("import: %v", got)
+	}
+	if got := refreshVMTimeZone(types.StringNull(), map[string]any{}); !got.IsNull() {
+		t.Errorf("none: %v", got)
+	}
+}

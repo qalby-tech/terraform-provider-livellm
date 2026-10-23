@@ -247,7 +247,8 @@ have.
 the cluster's zone, else UTC. After that the zone is the machine's own: change
 it on the machine itself. Another `time_zone` on an existing machine is an
 error at plan time, never a replacement; leaving it out keeps the machine as
-it is.
+it is. A refresh keeps the zone the machine was made with even when the
+platform no longer lists it (an edit in the console leaves it out).
 
 Ports published together, on the server's address (the host in `ssh`):
 `port_groups`. A group keeps its ports' numbers inside the machine and

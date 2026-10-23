@@ -891,7 +891,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	readVMSizes(&state, sp)
 	readVMCores(&state, sp)
 	state.Devices = readVMDevices(sp)
-	state.TimeZone = readVMTimeZone(sp)
+	state.TimeZone = refreshVMTimeZone(state.TimeZone, sp)
 	state.PortGroups = readPortGroups(sp)
 	if raw, ok := sp["allowCIDRs"].([]any); ok {
 		vals := make([]attr.Value, 0, len(raw))
