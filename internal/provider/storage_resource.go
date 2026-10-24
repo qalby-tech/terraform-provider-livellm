@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,7 +95,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description:   "CPU, e.g. \"1\" or \"500m\" (1 when unset).",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
-			"dedicated_cores": dedicatedCoresAttribute(" Postgres and Redis, of one instance (for now): with instances = 3 it is an error at plan time; an object storage has none."),
+			"dedicated_cores": dedicatedCoresAttribute(" Postgres and Redis, of one instance (for now): a Postgres of instances = 3 asking for them anew (new, shared before, more instances or more cores, or placed elsewhere) is an error at plan time, and one already so keeps running as it is; an object storage has none."),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -491,18 +493,20 @@ func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// The configuration's own pair is refused by ValidateConfig; this is the
-	// pair a plan keeps from what the database has (instances = 3 kept while
-	// dedicated_cores = true is written, or the other way round).
-	if e := dedicatedOneCopy(plan); e != nil {
-		resp.Diagnostics.AddAttributeError(path.Root("dedicated_cores"), e[0], e[1])
-	}
+	// Dedicated cores for more than one copy, as the platform judges them: any
+	// on a create, on an existing database only when asked anew.
 	if req.State.Raw.IsNull() {
+		if e := dedicatedOneCopy(plan, nil); e != nil {
+			resp.Diagnostics.AddAttributeError(path.Root("dedicated_cores"), e[0], e[1])
+		}
 		return // create
 	}
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	if e := dedicatedOneCopy(plan, &state); e != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("dedicated_cores"), e[0], e[1])
 	}
 	var configConsole types.Bool
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("admin_console"), &configConsole)...)
@@ -546,20 +550,106 @@ func objectStorageServersChange(plan, state storageModel) *[2]string {
 			plan.Name.ValueString(), serversWord(from), from, to)}
 }
 
-// dedicatedOneCopy refuses dedicated cores on a Postgres database of more
-// than one instance: the platform gives dedicated cores to one copy only, for
-// now, and refuses the pair at apply (422 dedicated_one_copy). Redis runs one
-// instance and an object storage has no dedicated cores, each refused on its
-// own. Nil while either is unknown.
-func dedicatedOneCopy(m storageModel) *[2]string {
-	if m.Engine.ValueString() != "postgres" || !known(m.Instances) || m.Instances.ValueInt64() <= 1 ||
-		!known(m.DedicatedCores) || !m.DedicatedCores.ValueBool() {
+// dedicatedOneCopy refuses dedicated cores asked anew for a Postgres
+// database of more than one instance, as the platform does at apply (422
+// dedicated_one_copy): dedicated cores are for one copy, for now. Asked anew
+// is what the platform judges: a new database (state nil, or another name or
+// engine, which replaces it), shared cores before, more instances, more whole
+// cores or another placement. One the platform already runs on dedicated
+// cores with 3 instances (an older platform made it so) keeps running as it
+// is while a plan leaves it so or gives it less: the platform takes that
+// save, so the plan does too. Whatever isn't known yet, or wasn't read (a
+// state from before dedicated_cores), is left to the platform at apply.
+// Redis runs one instance and an object storage has no dedicated cores, each
+// refused on its own.
+func dedicatedOneCopy(plan storageModel, state *storageModel) *[2]string {
+	if plan.Engine.ValueString() != "postgres" || !known(plan.Instances) || plan.Instances.ValueInt64() <= 1 ||
+		!known(plan.DedicatedCores) || !plan.DedicatedCores.ValueBool() {
 		return nil
 	}
-	n := m.Instances.ValueInt64()
+	n := plan.Instances.ValueInt64()
+	if state != nil && !dedicatedAskedAnew(plan, *state) {
+		return nil
+	}
 	return &[2]string{"Dedicated cores work with one copy for now",
 		fmt.Sprintf("Postgres with instances = %d runs %d copies. Set instances = 1, or dedicated_cores = false "+
 			"(shared cores).", n, n)}
+}
+
+// dedicatedAskedAnew reports whether a plan asks for an existing database's
+// dedicated cores anew (the platform's own test, its cores check): another
+// name or engine, shared cores before, more instances, more whole cores, or
+// another placement. Only what both sides know counts.
+func dedicatedAskedAnew(plan, state storageModel) bool {
+	if plan.Name.ValueString() != state.Name.ValueString() || plan.Engine.ValueString() != state.Engine.ValueString() {
+		return true
+	}
+	if known(state.DedicatedCores) && !state.DedicatedCores.ValueBool() {
+		return true
+	}
+	if !state.Instances.IsUnknown() {
+		from := int64(1)
+		if !state.Instances.IsNull() {
+			from = state.Instances.ValueInt64()
+		}
+		if plan.Instances.ValueInt64() > from {
+			return true
+		}
+	}
+	if from, ok := wholeCores(state.CPU); ok {
+		if to, ok := wholeCores(plan.CPU); ok && to > from {
+			return true
+		}
+	}
+	from, okFrom := placementKey(state.PlacementStrategy, state.PlacementHost, state.PlacementRegion)
+	to, okTo := placementKey(plan.PlacementStrategy, plan.PlacementHost, plan.PlacementRegion)
+	return okFrom && okTo && from != to
+}
+
+// wholeCores is a cpu value in whole cores, rounded up as the platform counts
+// dedicated cores ("500m" and "1" are 1, "1500m" is 2); false when it isn't
+// known or isn't a plain count or millicores.
+func wholeCores(v types.String) (int64, bool) {
+	if !known(v) {
+		return 0, false
+	}
+	s := strings.TrimSpace(v.ValueString())
+	var milli int64
+	if m, ok := strings.CutSuffix(s, "m"); ok {
+		n, err := strconv.ParseInt(m, 10, 64)
+		if err != nil || n < 0 {
+			return 0, false
+		}
+		milli = n
+	} else {
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil || f < 0 || math.IsInf(f, 0) || math.IsNaN(f) {
+			return 0, false
+		}
+		milli = int64(math.Ceil(f * 1000))
+	}
+	return (milli + 999) / 1000, true
+}
+
+// placementKey is where a placement puts a resource, as the platform compares
+// placements: "" when automatic (left out, "auto", or a strategy without its
+// host or region), else the strategy and its host or region alone. False while
+// any of the three isn't known.
+func placementKey(strategy, host, region types.String) (string, bool) {
+	if strategy.IsUnknown() || host.IsUnknown() || region.IsUnknown() {
+		return "", false
+	}
+	switch strategy.ValueString() {
+	case "host":
+		if h := host.ValueString(); h != "" {
+			return "host:" + h, true
+		}
+	case "region":
+		if r := region.ValueString(); r != "" {
+			return "region:" + r, true
+		}
+	}
+	return "", true
 }
 
 func serversWord(n int64) string {
@@ -669,10 +759,6 @@ func storageConfigErrors(m storageModel) [][2]string {
 			errs = append(errs, [2]string{"The secret key can't start or end with a space, tab or line break",
 				"Object storage drops them from around its keys, so the server and its apps would disagree. Remove them " +
 					"(a key read from a file often ends with a line break: trimspace(file(...)) drops it)."})
-		}
-	case "postgres":
-		if e := dedicatedOneCopy(m); e != nil {
-			errs = append(errs, *e)
 		}
 	case "redis":
 		if m.Backup != nil {

@@ -78,12 +78,15 @@
   2 of the plan's cores, and as 2 on pay as you go; a shared core as 1.
 - **Dedicated cores work with one copy, for now.** `livellm_storage` with
   `engine = "postgres"`, `instances = 3` and `dedicated_cores = true` is an
-  error at plan time ("Dedicated cores work with one copy for now"), also
-  when one of the two is kept from what the database has: set
-  `instances = 1`, or `dedicated_cores = false`. Any other resource of more
-  than one copy asking for dedicated cores, such as an app, is refused at
-  apply in the platform's words ("Dedicated cores work with one copy for
-  now: use 1 copy, or shared cores.").
+  error at plan time ("Dedicated cores work with one copy for now") when it
+  asks for them anew, as the platform judges it: a new database, shared
+  cores before, more instances, more cores, or another placement. Set
+  `instances = 1`, or `dedicated_cores = false`. A database the platform
+  already runs on dedicated cores with 3 instances keeps running as it is
+  while a plan leaves it so or gives it less (a larger disk, fewer cores).
+  Any other resource of more than one copy asking for dedicated cores, such
+  as an app, is refused at apply in the platform's words ("Dedicated cores
+  work with one copy for now: use 1 copy, or shared cores.").
 - Any refusal the platform answers with 422 that has no diagnostic of its
   own reads as the resource's error followed by the platform's words
   ("Cannot create VM: …"), no longer the raw answer.
