@@ -76,7 +76,7 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Description:   "CPU request, e.g. \"500m\". Left out, the platform's default is read back.",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
-			"dedicated_cores": dedicatedCoresAttribute(" Per copy."),
+			"dedicated_cores": dedicatedCoresAttribute(" For one copy only, for now: the platform refuses them for an app of more copies, at apply."),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,

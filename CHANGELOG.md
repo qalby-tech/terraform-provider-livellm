@@ -76,6 +76,14 @@
   words, which name the counts that fit (only a new or changed count is
   judged, so an existing odd one keeps running). A dedicated core counts as
   2 of the plan's cores, and as 2 on pay as you go; a shared core as 1.
+- **Dedicated cores work with one copy, for now.** `livellm_storage` with
+  `engine = "postgres"`, `instances = 3` and `dedicated_cores = true` is an
+  error at plan time ("Dedicated cores work with one copy for now"), also
+  when one of the two is kept from what the database has: set
+  `instances = 1`, or `dedicated_cores = false`. Any other resource of more
+  than one copy asking for dedicated cores, such as an app, is refused at
+  apply in the platform's words ("Dedicated cores work with one copy for
+  now: use 1 copy, or shared cores.").
 - Any refusal the platform answers with 422 that has no diagnostic of its
   own reads as the resource's error followed by the platform's words
   ("Cannot create VM: …"), no longer the raw answer.
@@ -115,8 +123,8 @@
   fails ("Cannot read the cores").
 - `cpus` is described in cores (a core is one host thread).
 - Needs LiveLLM API 0.78 or newer for all of it (dedicated cores on
-  machines from 0.77); the CPU model, the pairs and the clock for dedicated
-  cores only need the platform's release after 0.78. An older one names no
+  machines from 0.77); the CPU model, the pairs, one copy and the clock for
+  dedicated cores only need LiveLLM API 0.79. An older one names no
   CPU model (`running_cpu_model` and `model` read null) and still reports a
   clock, or mixed speeds, for shared cores. An older API ignores what it
   doesn't know: the apply warns ("Cores not kept as written", "Devices not

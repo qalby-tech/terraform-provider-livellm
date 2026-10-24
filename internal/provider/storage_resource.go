@@ -93,7 +93,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description:   "CPU, e.g. \"1\" or \"500m\" (1 when unset).",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
-			"dedicated_cores": dedicatedCoresAttribute(" Per instance; Postgres and Redis (an object storage has none)."),
+			"dedicated_cores": dedicatedCoresAttribute(" Postgres and Redis, of one instance (for now): with instances = 3 it is an error at plan time; an object storage has none."),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -483,11 +483,23 @@ func fillStorageFromSpec(m *storageModel, sp map[string]any) {
 var _ resource.ResourceWithModifyPlan = (*storageResource)(nil)
 
 func (r *storageResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
-		return // create or destroy
+	if req.Plan.Raw.IsNull() {
+		return // destroy
 	}
 	var plan, state storageModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// The configuration's own pair is refused by ValidateConfig; this is the
+	// pair a plan keeps from what the database has (instances = 3 kept while
+	// dedicated_cores = true is written, or the other way round).
+	if e := dedicatedOneCopy(plan); e != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("dedicated_cores"), e[0], e[1])
+	}
+	if req.State.Raw.IsNull() {
+		return // create
+	}
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -532,6 +544,22 @@ func objectStorageServersChange(plan, state storageModel) *[2]string {
 		fmt.Sprintf("%s runs %s; its servers are fixed when it is made. Keep instances = %d, or make a new object "+
 			"storage with instances = %d under another name and copy the files over.",
 			plan.Name.ValueString(), serversWord(from), from, to)}
+}
+
+// dedicatedOneCopy refuses dedicated cores on a Postgres database of more
+// than one instance: the platform gives dedicated cores to one copy only, for
+// now, and refuses the pair at apply (422 dedicated_one_copy). Redis runs one
+// instance and an object storage has no dedicated cores, each refused on its
+// own. Nil while either is unknown.
+func dedicatedOneCopy(m storageModel) *[2]string {
+	if m.Engine.ValueString() != "postgres" || !known(m.Instances) || m.Instances.ValueInt64() <= 1 ||
+		!known(m.DedicatedCores) || !m.DedicatedCores.ValueBool() {
+		return nil
+	}
+	n := m.Instances.ValueInt64()
+	return &[2]string{"Dedicated cores work with one copy for now",
+		fmt.Sprintf("Postgres with instances = %d runs %d copies. Set instances = 1, or dedicated_cores = false "+
+			"(shared cores).", n, n)}
 }
 
 func serversWord(n int64) string {
@@ -641,6 +669,10 @@ func storageConfigErrors(m storageModel) [][2]string {
 			errs = append(errs, [2]string{"The secret key can't start or end with a space, tab or line break",
 				"Object storage drops them from around its keys, so the server and its apps would disagree. Remove them " +
 					"(a key read from a file often ends with a line break: trimspace(file(...)) drops it)."})
+		}
+	case "postgres":
+		if e := dedicatedOneCopy(m); e != nil {
+			errs = append(errs, *e)
 		}
 	case "redis":
 		if m.Backup != nil {
