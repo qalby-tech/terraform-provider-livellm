@@ -76,6 +76,7 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				Description:   "CPU request, e.g. \"500m\". Left out, the platform's default is read back.",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
+			"dedicated_cores": dedicatedCoresAttribute(" Per copy."),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -127,6 +128,10 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 					"drops to their disk. Set it back to false to start the app again.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the app is running (false while stopped)."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 			"url": schema.StringAttribute{
 				Computed:    true,
 				Description: "The first HTTP port's public HTTPS URL, as reported by the platform.",
@@ -372,6 +377,7 @@ type containerAppModel struct {
 	ImageAuth         *imageAuthModel `tfsdk:"image_auth"`
 	Command           types.List      `tfsdk:"command"`
 	CPU               types.String    `tfsdk:"cpu"`
+	DedicatedCores    types.Bool      `tfsdk:"dedicated_cores"`
 	Memory            types.String    `tfsdk:"memory"`
 	Env               types.Map       `tfsdk:"env"`
 	SecretEnv         types.Map       `tfsdk:"secret_env"`
@@ -383,6 +389,7 @@ type containerAppModel struct {
 	Volume            types.List      `tfsdk:"volume"`
 	Stopped           types.Bool      `tfsdk:"stopped"`
 	Ready             types.Bool      `tfsdk:"ready"`
+	RunningCPUModel   types.String    `tfsdk:"running_cpu_model"`
 	URL               types.String    `tfsdk:"url"`
 	Endpoints         types.List      `tfsdk:"endpoints"`
 	PlacementStrategy types.String    `tfsdk:"placement_strategy"`
@@ -813,6 +820,7 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 	if v := m.CPU.ValueString(); v != "" {
 		spec["cpu"] = v
 	}
+	dedicatedSpec(m.DedicatedCores, spec)
 	if v := m.Memory.ValueString(); v != "" {
 		spec["memory"] = v
 	}
@@ -1137,17 +1145,19 @@ func readPorts(prev types.List, sp map[string]any) types.List {
 // whose configuration leaves them out; planned ones stay as planned.
 func settleAppSizes(ctx context.Context, c *client.Client, m *containerAppModel) {
 	var sp map[string]any
-	if m.CPU.IsUnknown() || m.Memory.IsUnknown() {
+	if m.CPU.IsUnknown() || m.Memory.IsUnknown() || m.DedicatedCores.IsUnknown() {
 		if w := fetchWorkload(ctx, c, m.Name.ValueString()); w != nil {
 			sp = w.Pod
 		}
 	}
 	m.CPU, m.Memory = settleString(m.CPU, sp["cpu"]), settleString(m.Memory, sp["memory"])
+	m.DedicatedCores = settleDedicated(m.DedicatedCores, sp)
 }
 
 func refreshAppStatus(ctx context.Context, c *client.Client, name string, m *containerAppModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, name)
+	m.RunningCPUModel = runningCPUModel(st)
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.URL = types.StringValue("")
@@ -1271,6 +1281,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	}
 	state.ImageAuth = readImageAuth(state.ImageAuth, sp["imageAuth"])
 	state.CPU, state.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
+	state.DedicatedCores = readDedicated(sp)
 	env, _ := sp["env"].([]any)
 	state.Env = readEnvMap(state.Env, env, true)
 	secretEnv, _ := sp["secretEnv"].([]any)

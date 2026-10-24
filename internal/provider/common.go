@@ -17,7 +17,11 @@ import (
 )
 
 // apiDiag turns a client error into an actionable diagnostic. These cases
-// have dedicated wording: a billing refusal the API names by its code
+// have dedicated wording: a machine's cores, or any resource's room, refused
+// by its code (coresRefusals: too few cores at the speed asked for, no single
+// speed with the cores, a speed no server has, no server with room); a
+// billing refusal
+// the API names by its code
 // (billingRefusals: pay as you go off, past its limit, a card missing, a
 // payment overdue, pay as you go not open to the account); any other 402, the
 // workspace plan's resource pool is exhausted (the fix is a plan change, not a
@@ -29,6 +33,9 @@ import (
 // where it comes from.
 func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 	var apiErr *client.APIError
+	if errors.As(err, &apiErr) && coresDiag(diags, summary, apiErr, 1) {
+		return
+	}
 	if errors.As(err, &apiErr) && (apiErr.Status == 402 || apiErr.Status == 403) {
 		if b, ok := billingRefusals[apiErr.Code()]; ok {
 			diags.AddError(b.summary, fmt.Sprintf("%s: %s\n\n%s", summary, apiErr.Message(), b.next))
@@ -72,6 +79,13 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 				"before a proxy change (newer platforms don't). A person can turn it on for the key on the API "+
 				"keys page; until then leave the proxy block as it is.", summary, apiErr.Message()),
 		)
+		return
+	}
+	// Any other 422 is the platform's refusal of what was asked, in its own
+	// words (dedicated cores in pairs on servers whose cores have 2 threads,
+	// a size under a kind's floor): shown as it says it, never judged here.
+	if errors.As(err, &apiErr) && apiErr.Status == 422 && apiErr.Message() != apiErr.Body {
+		diags.AddError(summary, fmt.Sprintf("%s: %s", summary, apiErr.Message()))
 		return
 	}
 	diags.AddError(summary, err.Error())

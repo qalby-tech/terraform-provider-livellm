@@ -189,6 +189,12 @@ resource "livellm_storage" "eu_db" {
 }
 ```
 
+Like every resource, a database or an object storage needs room on a server it
+may run on when it is new, started, grown or moved, else the apply stops with
+"This server is full: it has no room for this database." (or "No server has
+room for this database."; for object storage, "this object storage"): stop or
+shrink another resource, or give this one fewer cores or less memory.
+
 ## Schema
 
 ### Required
@@ -204,6 +210,7 @@ resource "livellm_storage" "eu_db" {
 - `disk_gi` (Number) Disk size in GiB, 5 when unset. Growing is an in-place update; shrinking is refused.
 - `instances` (Number) `1` (the default) or `3`. For Postgres, `3` is two standby copies, one of which takes over if the main one fails. For object storage, `3` is 3 servers, one on each of 3 hosts (it needs 3 hosts; never pinned to one), fixed when it is made: a change is refused at plan time. Redis runs as one instance; `3` is refused at plan time. Left out, the database keeps the instances it has (a configuration that drops `instances = 3` keeps 3; write `instances = 1` to go back to one on Postgres).
 - `cpu` (String) CPU, e.g. `1` or `500m`; `1` when unset.
+- `dedicated_cores` (Boolean) Whole cores of its server for it alone, all of `cpu`, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs (2, 4, 6…), and the platform refuses another count at apply, in its own words. A dedicated core counts as 2 of the plan's cores (and as 2 cores on pay as you go). Per instance, for Postgres and Redis; an object storage has none (`true` there is an error at plan time). Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
 - `memory` (String) Memory, e.g. `1Gi`; `1Gi` when unset.
 - `username` (String) Application username (Postgres), or an object storage's access key. Left out, the platform names it `app` (an object storage gets a generated access key), and leaving it out later keeps the name the database has. Changing it replaces the database.
 - `expose` (Boolean) Expose the database externally over TLS. An object storage gets an HTTPS S3 address, path-style.
@@ -219,6 +226,7 @@ resource "livellm_storage" "eu_db" {
 ### Read-Only
 
 - `ready` (Boolean) Whether the database is up.
+- `running_cpu_model` (String) The CPU model of the server the running database or object storage runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
 - `servers_desired` (Number) An object storage of 3 servers: how many servers it runs (`3`). Null for anything else.
 - `servers_ready` (Number) An object storage of 3 servers: how many of its servers are ready. It keeps serving with one down. Null for anything else.
 - `endpoints` (List of Object) Connection endpoints (`name`, `url`, `addr`, `tcp`, `udp`) — in-cluster and, when exposed, external (an object storage's are `s3` and `s3-external`).

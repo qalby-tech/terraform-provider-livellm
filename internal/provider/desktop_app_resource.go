@@ -63,6 +63,7 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Description:   "CPU, e.g. \"2\". Left out, the platform's default is read back.",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
+			"dedicated_cores": dedicatedCoresAttribute(""),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -104,6 +105,10 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 				Description: "Stop the desktop without deleting the app. The home folder is kept (keep_files) and only it is billed.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the desktop is up (false while stopped)."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
@@ -131,12 +136,14 @@ type desktopAppModel struct {
 	Name              types.String   `tfsdk:"name"`
 	Image             types.String   `tfsdk:"image"`
 	CPU               types.String   `tfsdk:"cpu"`
+	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
 	Memory            types.String   `tfsdk:"memory"`
 	Resolution        types.String   `tfsdk:"resolution"`
 	KeepFiles         types.Bool     `tfsdk:"keep_files"`
 	StorageGi         types.Int64    `tfsdk:"storage_gi"`
 	Stopped           types.Bool     `tfsdk:"stopped"`
 	Ready             types.Bool     `tfsdk:"ready"`
+	RunningCPUModel   types.String   `tfsdk:"running_cpu_model"`
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
@@ -169,6 +176,7 @@ func desktopSpec(m desktopAppModel) map[string]any {
 			spec[key] = s
 		}
 	}
+	dedicatedSpec(m.DedicatedCores, spec)
 	if m.KeepFiles.ValueBool() {
 		spec["keepFiles"] = true
 		if !m.StorageGi.IsNull() && !m.StorageGi.IsUnknown() {
@@ -198,6 +206,7 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 	}
 	m.Image, m.Resolution = str("image"), str("resolution")
 	m.CPU, m.Memory = readSize(d["cpu"]), readSize(d["memory"])
+	m.DedicatedCores = readDedicated(d)
 	refreshPlacement(d, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	m.Database = readMachineDatabases(d)
 	keep, _ := d["keepFiles"].(bool)
@@ -209,6 +218,7 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 // settings on the platform (nil when they could not be read).
 func settleDesktopSizes(m *desktopAppModel, d map[string]any) {
 	m.CPU, m.Memory = settleString(m.CPU, d["cpu"]), settleString(m.Memory, d["memory"])
+	m.DedicatedCores = settleDedicated(m.DedicatedCores, d)
 	m.StorageGi = settleInt64(m.StorageGi, readGi(types.Int64Null(), d["storageSize"]))
 }
 
@@ -218,6 +228,7 @@ func desktopBlock(w *client.Workload) map[string]any { return w.Desktop }
 func refreshDesktopStatus(ctx context.Context, c *client.Client, m *desktopAppModel) {
 	st, _ := statusOf(ctx, c, m.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+	m.RunningCPUModel = runningCPUModel(st)
 }
 
 // refreshDesktopSizes reads back the sizes the platform chose after a write.

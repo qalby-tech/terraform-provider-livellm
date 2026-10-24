@@ -136,6 +136,7 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description:   "CPU request, e.g. \"1\". Left out, the platform's default for the engine is read back.",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
+			"dedicated_cores": dedicatedCoresAttribute(""),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -178,6 +179,10 @@ func (r *browserResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 					"browser made before profiles existed turns it on at its next restart.",
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the browser is up."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 		},
 		Blocks: map[string]schema.Block{
 			"timeouts": timeouts.Block(ctx, timeouts.Opts{Create: true, Delete: true}),
@@ -333,6 +338,7 @@ type browserModel struct {
 	Name              types.String   `tfsdk:"name"`
 	Engine            types.String   `tfsdk:"engine"`
 	CPU               types.String   `tfsdk:"cpu"`
+	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
 	Memory            types.String   `tfsdk:"memory"`
 	Locale            types.String   `tfsdk:"locale"`
 	Timezone          types.String   `tfsdk:"timezone"`
@@ -341,6 +347,7 @@ type browserModel struct {
 	Proxy             types.Object   `tfsdk:"proxy"`
 	ProfilesReady     types.Bool     `tfsdk:"profiles_ready"`
 	Ready             types.Bool     `tfsdk:"ready"`
+	RunningCPUModel   types.String   `tfsdk:"running_cpu_model"`
 	Timeouts          timeouts.Value `tfsdk:"timeouts"`
 	PlacementStrategy types.String   `tfsdk:"placement_strategy"`
 	PlacementHost     types.String   `tfsdk:"placement_host"`
@@ -492,6 +499,7 @@ func browserSpec(ctx context.Context, plan, cfg browserModel, state *browserMode
 	if v := plan.CPU.ValueString(); v != "" {
 		spec["cpu"] = v
 	}
+	dedicatedSpec(plan.DedicatedCores, spec)
 	if v := plan.Memory.ValueString(); v != "" {
 		spec["memory"] = v
 	}
@@ -903,6 +911,7 @@ func readBrowser(ctx context.Context, prev browserModel, sp map[string]any, all 
 	m := prev
 	m.Engine = readEngine(sp["engine"])
 	m.CPU, m.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
+	m.DedicatedCores = readDedicated(sp)
 	if all || known(prev.Locale) {
 		m.Locale = readSetting(sp["locale"])
 	}
@@ -1091,6 +1100,7 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 				m.Languages = read.Languages
 			}
 			m.CPU = settleString(plan.CPU, w.Browser["cpu"])
+			m.DedicatedCores = settleDedicated(plan.DedicatedCores, w.Browser)
 			m.Memory = settleString(plan.Memory, w.Browser["memory"])
 			if b, ok := w.Browser["profilesReady"].(bool); ok {
 				fromSpec = &b
@@ -1099,11 +1109,13 @@ func (r *browserResource) applied(ctx context.Context, plan browserModel, diags 
 	}
 	st, _ := statusOf(ctx, r.data.Client, plan.Name.ValueString())
 	m.Ready = types.BoolValue(st != nil && st.Ready)
+	m.RunningCPUModel = runningCPUModel(st)
 	m.ProfilesReady = profilesReady(fromSpec, st)
 	if m.Languages.IsUnknown() {
 		m.Languages = types.ListNull(types.StringType)
 	}
 	m.CPU, m.Memory = settleString(m.CPU, nil), settleString(m.Memory, nil)
+	m.DedicatedCores = settleDedicated(m.DedicatedCores, nil)
 	m.Proxy = withoutSecrets(ctx, m.Proxy)
 	return m
 }
@@ -1187,6 +1199,7 @@ func (r *browserResource) Read(ctx context.Context, req resource.ReadRequest, re
 	state.ReachableFrom = readReach(ctx, state.ReachableFrom, w.ReachableFrom)
 	st, _ := statusOf(ctx, r.data.Client, state.Name.ValueString())
 	state.Ready = types.BoolValue(st != nil && st.Ready)
+	state.RunningCPUModel = runningCPUModel(st)
 	var fromSpec *bool
 	if b, ok := w.Browser["profilesReady"].(bool); ok {
 		fromSpec = &b

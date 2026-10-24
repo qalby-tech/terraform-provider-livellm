@@ -85,6 +85,11 @@ resource "livellm_browser" "pinned" {
 }
 ```
 
+Like every resource, a browser needs room on a server it may run on when it is
+new, started, grown or moved, else the apply stops with "This server is full:
+it has no room for this browser." (or "No server has room for this browser."):
+stop or shrink another resource, or give this one fewer cores or less memory.
+
 ## Locale and time zone
 
 `locale`, `timezone`, `languages` and `geolocation` restart the browser when
@@ -167,6 +172,7 @@ is stored for it, and the plan warns about that.
 - `engine` (String) `chrome` (the default) or `camoufox`, see
   [Engines](#engines). Changing it replaces the browser.
 - `cpu` (String) CPU request, e.g. `1`. Left out, the platform's default for the engine is read back (no plan to change it); removing it later keeps the size the browser has.
+- `dedicated_cores` (Boolean) Whole cores of its server for it alone, all of `cpu`, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs (2, 4, 6…), and the platform refuses another count at apply, in its own words. A dedicated core counts as 2 of the plan's cores (and as 2 cores on pay as you go). Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
 - `memory` (String) Memory request, e.g. `2Gi`. Left out, the platform's default for the engine is read back (no plan to change it); removing it later keeps the size the browser has.
 - `locale` (String) The browser's language and region, e.g. `ru-RU`, used for
   its pages, `navigator.language` and `Intl`. Use current codes (`he-IL`, not
@@ -222,6 +228,7 @@ is stored for it, and the plan warns about that.
 ### Read-Only
 
 - `ready` (Boolean) Whether the browser is up.
+- `running_cpu_model` (String) The CPU model of the server the running browser runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
 - `profiles_ready` (Boolean) Whether the browser's profile can be saved,
   restored, exported and imported (from the console, the API or the CLI).
   A browser made before profiles existed turns this on at its next restart.

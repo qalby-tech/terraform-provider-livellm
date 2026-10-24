@@ -85,6 +85,17 @@ func (e *APIError) Code() string {
 	return ""
 }
 
+// Count is a whole number the answer carries beside its error and code (a
+// cores refusal's "fit"), and whether it carries one.
+func (e *APIError) Count(key string) (int, bool) {
+	var b map[string]any
+	if json.Unmarshal([]byte(e.Body), &b) != nil {
+		return 0, false
+	}
+	f, ok := b[key].(float64)
+	return int(f), ok
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
@@ -162,6 +173,21 @@ type WorkloadStatus struct {
 	// Servers: an object storage of 3 servers, how many it runs and how many
 	// are ready (absent for anything else).
 	Servers *ServerCount `json:"servers,omitempty"`
+	// Cores: a running resource's cores, the CPU model of the server it runs
+	// on and, with dedicated cores, the clock they got (absent while it isn't
+	// running, and from a platform without dedicated cores).
+	Cores *CoreStatus `json:"cores,omitempty"`
+}
+
+// CoreStatus is a running resource's cores: Model, the CPU of the server it
+// runs on ("Intel Core i9-14900K"), shared or dedicated; and with dedicated
+// cores only, SpeedMHz when they are all of one speed, else Mixed with the
+// platform's words. Shared cores have no clock: neither is set for them.
+type CoreStatus struct {
+	SpeedMHz int    `json:"speedMHz,omitempty"`
+	Mixed    bool   `json:"mixed,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // ServerCount is an object storage cluster's servers: desired and ready.
@@ -282,4 +308,59 @@ func (c *Client) FleetHosts(ctx context.Context) ([]Host, error) {
 		return nil, err
 	}
 	return out.Hosts, nil
+}
+
+// CoreSpeedRoom is one of the servers' clock speeds, the CPU model of the
+// servers that have it, and the most cores of it a new machine with
+// dedicated cores can get on one server (whole cores: on servers whose cores
+// have 2 threads, an even count).
+type CoreSpeedRoom struct {
+	SpeedMHz int    `json:"speedMHz"`
+	Fit      int    `json:"fit"`
+	Model    string `json:"model,omitempty"`
+}
+
+// MachineCores is what a new machine with dedicated cores can get (GET
+// /v1/machine-cores): whether a speed can be asked for at all, each speed's
+// room, fastest first (none where every server runs at one speed), and the
+// most cores of one speed on one server, any speed.
+type MachineCores struct {
+	ShowSpeed    bool            `json:"showSpeed"`
+	Speeds       []CoreSpeedRoom `json:"speeds"`
+	DedicatedFit int             `json:"dedicatedFit"`
+}
+
+// MachineCores reads the cores a new machine with dedicated cores can get on
+// the servers the key's workspace may run on.
+func (c *Client) MachineCores(ctx context.Context) (*MachineCores, error) {
+	var mc MachineCores
+	if err := c.do(ctx, http.MethodGet, "/v1/machine-cores", nil, &mc); err != nil {
+		return nil, err
+	}
+	return &mc, nil
+}
+
+// MachineDevice is one of the cluster's devices a machine of the key's
+// workspace may be given (GET /v1/machine-devices): a GPU or a USB
+// controller, how many the cluster has, how many no machine has, and this
+// workspace's machines that have it.
+type MachineDevice struct {
+	ID    string   `json:"id"`
+	Label string   `json:"label"`
+	Kind  string   `json:"kind"`
+	Total int      `json:"total"`
+	Free  int      `json:"free"`
+	Here  []string `json:"here"`
+}
+
+// MachineDevices lists the devices a machine of the key's workspace may be
+// given; empty where the cluster offers none.
+func (c *Client) MachineDevices(ctx context.Context) ([]MachineDevice, error) {
+	var out struct {
+		Devices []MachineDevice `json:"devices"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/machine-devices", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Devices, nil
 }

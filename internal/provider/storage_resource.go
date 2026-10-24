@@ -93,6 +93,7 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				Description:   "CPU, e.g. \"1\" or \"500m\" (1 when unset).",
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
+			"dedicated_cores": dedicatedCoresAttribute(" Per instance; Postgres and Redis (an object storage has none)."),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -151,6 +152,10 @@ func (r *storageResource) Schema(ctx context.Context, _ resource.SchemaRequest, 
 				PlanModifiers: []planmodifier.Bool{keepSizeWhenUnset{}},
 			},
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the database is up."},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 			"servers_desired": schema.Int64Attribute{
 				Computed:    true,
 				Description: "An object storage of 3 servers: how many servers it runs (3). Null for anything else.",
@@ -221,6 +226,7 @@ type storageModel struct {
 	DiskGi            types.Int64         `tfsdk:"disk_gi"`
 	Instances         types.Int64         `tfsdk:"instances"`
 	CPU               types.String        `tfsdk:"cpu"`
+	DedicatedCores    types.Bool          `tfsdk:"dedicated_cores"`
 	Memory            types.String        `tfsdk:"memory"`
 	Username          types.String        `tfsdk:"username"`
 	PasswordWO        types.String        `tfsdk:"password_wo"`
@@ -230,6 +236,7 @@ type storageModel struct {
 	AdminConsole      types.Bool          `tfsdk:"admin_console"`
 	Backup            *storageBackupModel `tfsdk:"backup"`
 	Ready             types.Bool          `tfsdk:"ready"`
+	RunningCPUModel   types.String        `tfsdk:"running_cpu_model"`
 	ServersDesired    types.Int64         `tfsdk:"servers_desired"`
 	ServersReady      types.Int64         `tfsdk:"servers_ready"`
 	Endpoints         types.List          `tfsdk:"endpoints"`
@@ -294,6 +301,9 @@ func storageSpec(ctx context.Context, m storageModel, password string, update bo
 	}
 	if v := m.CPU.ValueString(); v != "" {
 		spec["cpu"] = v
+	}
+	if m.Engine.ValueString() != "s3" {
+		dedicatedSpec(m.DedicatedCores, spec)
 	}
 	if v := m.Memory.ValueString(); v != "" {
 		spec["memory"] = v
@@ -464,6 +474,7 @@ func fillStorageFromSpec(m *storageModel, sp map[string]any) {
 	if m.CPU.IsUnknown() {
 		m.CPU = types.StringNull()
 	}
+	m.DedicatedCores = settleDedicated(m.DedicatedCores, sp)
 	if m.Memory.IsUnknown() {
 		m.Memory = types.StringNull()
 	}
@@ -618,6 +629,10 @@ func storageConfigErrors(m storageModel) [][2]string {
 			errs = append(errs, [2]string{"An object storage of 3 servers can't be pinned to one host",
 				"It runs one server on each of 3 hosts. Leave placement_strategy out (automatic) or choose a region."})
 		}
+		if m.DedicatedCores.ValueBool() {
+			errs = append(errs, [2]string{"Object storage has no dedicated cores",
+				"Dedicated cores are for Postgres and Redis; an object storage has none. Remove dedicated_cores."})
+		}
 		if v := m.Version; !v.IsUnknown() && !v.IsNull() && v.ValueString() != "1" {
 			errs = append(errs, [2]string{"Object storage runs version 1",
 				fmt.Sprintf("Version %q isn't offered. Set version = \"1\" or leave it out.", v.ValueString())})
@@ -645,6 +660,7 @@ func refreshStorageStatus(ctx context.Context, c *client.Client, m *storageModel
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, m.Name.ValueString())
 	m.ServersDesired, m.ServersReady = types.Int64Null(), types.Int64Null()
+	m.RunningCPUModel = runningCPUModel(st)
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.Endpoints = types.ListValueMust(epType, []attr.Value{})
@@ -740,6 +756,7 @@ func readStorage(state *storageModel, sp map[string]any, imported bool) {
 		}
 	}
 	readStorageSizes(state, sp)
+	state.DedicatedCores = readDedicated(sp)
 	state.Instances = storageInstances(sp)
 	if v := storageUsername(sp); v != "" {
 		state.Username = types.StringValue(v)

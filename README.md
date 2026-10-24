@@ -57,14 +57,15 @@ Manage the core of a workspace as code today:
 
 | Resource | What it creates |
 |---|---|
-| `livellm_vm` | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, a stop time, the databases it reaches |
+| `livellm_vm` | A machine: Ubuntu (terminal or desktop), Debian, Fedora or Windows; SSH keys, ports, port groups, a stop time, the databases it reaches, dedicated cores, devices (a GPU, a USB controller) |
 | `livellm_container_app` | An app from an image or a Git repo the platform builds — one service of a Composable App (`stack`, `hostname`, `starts_after`), linked to its databases (`database`), HTTP, raw TCP/UDP and internal ports, volumes, stop and start |
 | `livellm_storage` | Managed Postgres, Redis or object storage (S3), backups, admin console, external access |
 | `livellm_browser` | A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |
 | `livellm_browser_api` | One address that drives several browsers, Chrome and Camoufox together: fewest open tabs, sessions, or a named browser |
 | `livellm_desktop_app` | A Linux desktop in a container that starts in seconds, one for each agent or task |
 
-Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`, `livellm_hosts`.
+Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`, `livellm_hosts`,
+`livellm_machine_cores`, `livellm_machine_devices`.
 
 Every resource can say where it runs (`placement_strategy`, `placement_region`,
 `placement_host`): left out, LiveLLM picks the host; a region runs it on any of
@@ -87,7 +88,9 @@ organization's workspace ask an owner of the organization to give it more under
 Organization → Billing. Pay as you go past its monthly limit, a card missing, a
 payment overdue and pay as you go not yet open to the account each get their
 own diagnostic, naming what a person does on the Billing page (an API key can't
-add a card, pay or raise the limit). Create/update timeouts are configurable per resource via the standard `timeouts` block.
+add a card, pay or raise the limit). A dedicated core (`dedicated_cores = true`)
+counts as 2 of the plan's cores, and as 2 on pay as you go; a shared core
+counts as 1. Create/update timeouts are configurable per resource via the standard `timeouts` block.
 
 ~> Write-only arguments (`password_wo`) require Terraform 1.11+ or
 OpenTofu 1.11+.
@@ -97,6 +100,9 @@ OpenTofu 1.11+.
 - [`examples/basic`](examples/basic) — provider setup plus the
   `livellm_workspace` data source. Full per-resource examples live in the
   [registry documentation](https://registry.terraform.io/providers/qalby-tech/livellm/latest/docs).
+- [`examples/dedicated-machine`](examples/dedicated-machine) — the servers'
+  core speeds, a machine with dedicated cores, the clock of the cores it got
+  and the CPU model of its server; applying it creates the machine.
 
 ## Developing the provider
 

@@ -42,3 +42,55 @@ func TestDeleteWorkloadWhenTheAnswerIsLost(t *testing.T) {
 		t.Error("a refusal is an error, whatever the workspace shows")
 	}
 }
+
+// A cores refusal's numbers read back from its answer; an answer without
+// them, or not JSON, has none.
+func TestAPIErrorCount(t *testing.T) {
+	e := &APIError{Status: 409, Body: `{"error":"Only 6 cores at 5.7 GHz are available.","code":"core_speed_short","fit":6,"speedMHz":5700,"workload":"ws"}`}
+	if n, ok := e.Count("fit"); !ok || n != 6 {
+		t.Errorf("fit = %d, %v", n, ok)
+	}
+	if n, ok := e.Count("speedMHz"); !ok || n != 5700 {
+		t.Errorf("speedMHz = %d, %v", n, ok)
+	}
+	for _, c := range []struct{ body, key string }{
+		{`{"error":"x","code":"server_full","workload":"ws"}`, "fit"},
+		{`{"workload":"ws"}`, "workload"},
+		{`not json`, "fit"},
+	} {
+		if n, ok := (&APIError{Status: 409, Body: c.body}).Count(c.key); ok {
+			t.Errorf("%s %s = %d, want none", c.body, c.key, n)
+		}
+	}
+}
+
+// The status's cores decode: dedicated cores of one speed, or mixed with the
+// platform's words; shared cores the server's CPU model alone; absent from a
+// platform that doesn't say.
+func TestStatusCores(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"workloads":[
+			{"id":"fast","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"speedMHz":5700,"model":"Intel Core i9-14900K"}},
+			{"id":"mixed","type":"vm-ubuntu","phase":"Running","ready":true,"cores":{"mixed":true,"message":"Mixed core speeds"}},
+			{"id":"old","type":"vm-ubuntu","phase":"Running","ready":true},
+			{"id":"web","type":"pod","phase":"Running","ready":true,"cores":{"model":"AMD EPYC 9654"}}]}`))
+	}))
+	defer srv.Close()
+	st, err := New(srv.URL, "llc_test").Status(context.Background())
+	if err != nil || len(st.Workloads) != 4 {
+		t.Fatalf("status: %v %v", st, err)
+	}
+	if c := st.Workloads[0].Cores; c == nil || c.SpeedMHz != 5700 || c.Mixed || c.Model != "Intel Core i9-14900K" {
+		t.Errorf("fast: %+v", c)
+	}
+	if c := st.Workloads[1].Cores; c == nil || !c.Mixed || c.SpeedMHz != 0 ||
+		c.Message != "Mixed core speeds" || c.Model != "" {
+		t.Errorf("mixed: %+v", c)
+	}
+	if c := st.Workloads[2].Cores; c != nil {
+		t.Errorf("old: %+v", c)
+	}
+	if c := st.Workloads[3].Cores; c == nil || c.SpeedMHz != 0 || c.Mixed || c.Model != "AMD EPYC 9654" {
+		t.Errorf("shared: %+v", c)
+	}
+}

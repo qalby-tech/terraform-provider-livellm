@@ -91,7 +91,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"cpus": schema.Int64Attribute{
 				Optional:      true,
 				Computed:      true,
-				Description:   "vCPU count. Left out, the platform's default for the kind of machine is read back.",
+				Description:   "How many cores (a core is one host thread). Left out, the platform's default for the kind of machine is read back.",
 				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
 			"memory_gi": schema.Int64Attribute{
@@ -107,6 +107,54 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 					"Left out, the platform's default for the kind of machine is read back.",
 				PlanModifiers: []planmodifier.Int64{keepSizeWhenUnset{}},
 			},
+			"dedicated_cores": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Whole cores of its server for this machine alone, instead of shared (the default), which may " +
+					"be slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs " +
+					"(cpus 2, 4, 6…), and the platform refuses another count at apply. On servers whose cores run at " +
+					"different clock speeds, they are all of one speed (core_speed). A dedicated core counts as 2 of the " +
+					"plan's cores. Left out, the machine keeps what it has; false makes them shared. A change reaches a " +
+					"running machine at its next restart.",
+				PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
+			},
+			"core_speed": schema.Int64Attribute{
+				Optional: true,
+				Computed: true,
+				Description: "With dedicated_cores, where the servers' cores run at different clock speeds: the clock in MHz " +
+					"of the cores to get (5700 for 5.7 GHz), one of the servers' speeds (the livellm_machine_cores data source " +
+					"lists them). 0 (the default): any cores of one speed. Left out, the machine keeps what it has.",
+				Validators:    []validator.Int64{int64validator.AtLeast(0)},
+				PlanModifiers: []planmodifier.Int64{keepCoreChoice{}},
+			},
+			"mixed_speeds": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "With dedicated_cores: keep this many cores although no single clock speed has that many free, " +
+					"so they may run at different speeds (the console's Continue with mixed speeds). Left out, the machine " +
+					"keeps what it has; false asks for cores of one speed again.",
+				PlanModifiers: []planmodifier.Bool{keepCoreChoice{}},
+			},
+			"devices": schema.ListAttribute{
+				Optional:    true,
+				Computed:    true,
+				ElementType: types.StringType,
+				Description: "The cluster's devices this machine has, by id: a GPU, a USB controller (the " +
+					"livellm_machine_devices data source lists them). Each is passed through to the machine, which then " +
+					"stays on the server that has it; a device is one machine's at a time. A change reaches a running " +
+					"machine at its next restart. Left out, the machine keeps what it has; [] removes them.",
+				PlanModifiers: []planmodifier.List{keepWhenLeftOut{}},
+			},
+			"time_zone": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "The machine's time zone when it is made, an IANA name such as \"Europe/Moscow\". Left out: " +
+					"the cluster's zone, else UTC. It is set at the first start; after that change it on the machine " +
+					"itself: another value on an existing machine is refused at plan time.",
+				Validators:    []validator.String{stringvalidator.RegexMatches(timezoneRe, "must be a time zone name such as Europe/Moscow or UTC")},
+				PlanModifiers: []planmodifier.String{keepWhenLeftOut{}},
+			},
+			"port_groups": portGroupsAttribute(),
 			"username": schema.StringAttribute{
 				Required: true,
 				Description: "The login's username, for SSH too; on Windows it is an administrator and can't be \"Administrator\". " +
@@ -164,6 +212,22 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 			"ready": schema.BoolAttribute{Computed: true, Description: "Whether the VM is up (false while stopped)."},
 			"ssh":   schema.StringAttribute{Computed: true, Description: "host:port to SSH into the VM, as reported by the platform."},
 			"url":   schema.StringAttribute{Computed: true, Description: "The first exposed HTTP port's public HTTPS URL."},
+			"running_core_speed": schema.Int64Attribute{
+				Computed: true,
+				Description: "Dedicated cores only: the clock in MHz of the cores the running machine got, when they are " +
+					"all of one speed. Null on shared cores (they have no clock), while it isn't running, when they run at " +
+					"different speeds (running_mixed_speeds), and where the servers list no speeds.",
+			},
+			"running_mixed_speeds": schema.BoolAttribute{
+				Computed: true,
+				Description: "Dedicated cores only: true when the running machine's cores run at different clock speeds, " +
+					"false when they are all of one speed (running_core_speed). Null on shared cores (they have no clock), " +
+					"while it isn't running and where the servers list no speeds.",
+			},
+			"running_cpu_model": schema.StringAttribute{
+				Computed:    true,
+				Description: runningCPUModelDescription,
+			},
 			"endpoints": schema.ListNestedAttribute{
 				Computed:    true,
 				Description: "Every exposed port's public address.",
@@ -210,7 +274,8 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 						"internal": schema.BoolAttribute{
 							Optional: true,
 							Description: "No public address and no node port: the port is only an address inside the workspace, " +
-								"<workspace>-<name>-internal:<port>, for the resources reachable_from lets in.",
+								"<workspace>-<name>-internal:<port> (and, as every port of the machine, <workspace>-<name>-host:<port>), " +
+								"for the resources reachable_from lets in.",
 						},
 					},
 				},
@@ -251,6 +316,12 @@ type vmResourceModel struct {
 	CPUs              types.Int64    `tfsdk:"cpus"`
 	MemoryGi          types.Int64    `tfsdk:"memory_gi"`
 	DiskGi            types.Int64    `tfsdk:"disk_gi"`
+	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
+	CoreSpeed         types.Int64    `tfsdk:"core_speed"`
+	MixedSpeeds       types.Bool     `tfsdk:"mixed_speeds"`
+	Devices           types.List     `tfsdk:"devices"`
+	TimeZone          types.String   `tfsdk:"time_zone"`
+	PortGroups        types.List     `tfsdk:"port_groups"`
 	Username          types.String   `tfsdk:"username"`
 	PasswordWO        types.String   `tfsdk:"password_wo"`
 	PasswordWOVersion types.Int64    `tfsdk:"password_wo_version"`
@@ -267,6 +338,9 @@ type vmResourceModel struct {
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
 	ReachableFrom     types.List     `tfsdk:"reachable_from"`
 	Ready             types.Bool     `tfsdk:"ready"`
+	RunningCoreSpeed  types.Int64    `tfsdk:"running_core_speed"`
+	RunningMixed      types.Bool     `tfsdk:"running_mixed_speeds"`
+	RunningCPUModel   types.String   `tfsdk:"running_cpu_model"`
 	SSH               types.String   `tfsdk:"ssh"`
 	URL               types.String   `tfsdk:"url"`
 	Endpoints         types.List     `tfsdk:"endpoints"`
@@ -290,8 +364,17 @@ func (r *vmResource) ValidateConfig(ctx context.Context, req resource.ValidateCo
 	for _, e := range windowsConfigErrors(cfg) {
 		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
 	}
+	for _, e := range sharedCoreErrors(cfg.DedicatedCores, cfg.MixedSpeeds, cfg.CoreSpeed) {
+		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
+	}
 	for _, e := range machineDatabaseErrors(cfg.Database, "machine") {
 		resp.Diagnostics.AddAttributeError(path.Root("database"), e[0], e[1])
+	}
+	for _, e := range vmDeviceErrors(cfg.Devices) {
+		resp.Diagnostics.AddAttributeError(path.Root("devices"), e[0], e[1])
+	}
+	for _, e := range portGroupErrors(ctx, cfg.PortGroups) {
+		resp.Diagnostics.AddAttributeError(path.Root("port_groups"), e[0], e[1])
 	}
 }
 
@@ -426,6 +509,16 @@ type vmWrite struct {
 	// create says this is the create body, where a machine's keys travel
 	// inside credentials.
 	create bool
+	// devices and portGroups are the configuration's: sent only when it
+	// writes them (an empty list removes them); left out, the platform keeps
+	// what the machine has.
+	devices, portGroups types.List
+}
+
+// sends says what a write of these settings sends beside the machine's own:
+// the devices and the port groups.
+func (wr vmWrite) sends() (devices, groups bool) {
+	return known(wr.devices), known(wr.portGroups)
 }
 
 // normalizeKey is a public key line the way the platform keeps it: single
@@ -490,6 +583,12 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	if known(m.DiskGi) {
 		spec["storageSize"] = fmt.Sprintf("%dGi", m.DiskGi.ValueInt64())
 	}
+	vmCoresSpec(m, spec)
+	vmTimeZoneSpec(m, spec)
+	vmDevicesSpec(wr.devices, spec)
+	if groups := portGroupsSpec(ctx, wr.portGroups); groups != nil {
+		spec["portGroups"] = groups
+	}
 	keys := configuredKeys(ctx, m.SSHKeys)
 	if wr.password != "" {
 		creds := map[string]any{
@@ -550,6 +649,8 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, diags *diag.Diagnostics) {
 	epType := types.ObjectType{AttrTypes: endpointAttrTypes}
 	st, err := statusOf(ctx, c, m.Name.ValueString())
+	m.RunningCoreSpeed, m.RunningMixed = runningCores(st)
+	m.RunningCPUModel = runningCPUModel(st)
 	if err != nil || st == nil {
 		m.Ready = types.BoolValue(false)
 		m.SSH = types.StringValue("")
@@ -580,18 +681,27 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 }
 
 // refreshVMSpec reads back what the platform decides: when the machine will
-// stop, and its keys when the configuration leaves them alone.
-func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
+// stop, its keys when the configuration leaves them alone, its groups'
+// offsets; it warns when the platform didn't keep the machine's cores,
+// devices, groups or time zone as the write (wr) sent them.
+func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, wr vmWrite, diags *diag.Diagnostics) {
 	var w *client.Workload
 	if ws, err := c.Workloads(ctx); err == nil {
 		w = findWorkload(ws, m.Name.ValueString())
 	}
+	sentDevices, sentGroups := wr.sends()
 	if w == nil {
 		m.ExpiresAt = types.StringValue("")
 		if m.SSHKeys.IsUnknown() {
 			m.SSHKeys = types.ListValueMust(types.StringType, []attr.Value{})
 		}
 		settleVMSizes(m, nil)
+		settleVMCores(m, nil)
+		settleVMDevices(m, nil, false, diags)
+		settleVMPortGroups(ctx, m, nil, false, diags)
+		if m.TimeZone.IsUnknown() {
+			m.TimeZone = types.StringNull()
+		}
 		return
 	}
 	m.ExpiresAt = types.StringValue(w.ExpiresAt)
@@ -599,6 +709,11 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel) {
 		m.SSHKeys = keyList(remoteKeys(w.VM))
 	}
 	settleVMSizes(m, w.VM)
+	settleVMCores(m, w.VM)
+	warnCoresNotKept(m.Name.ValueString(), *m, w.VM, diags)
+	settleVMDevices(m, w.VM, sentDevices, diags)
+	settleVMPortGroups(ctx, m, w.VM, sentGroups, diags)
+	settleVMTimeZone(m, w.VM, diags)
 }
 
 // readVMSizes fills the machine's sizes from the platform's copy: the
@@ -659,17 +774,26 @@ func sameKeys(a, b []string) bool {
 	return true
 }
 
-// ModifyPlan refuses the one change the platform can't make, and keeps
-// expires_at quiet on an apply that doesn't move it.
+// ModifyPlan settles the cores against dedicated_cores, refuses the one
+// change the platform can't make, and keeps expires_at quiet on an apply that
+// doesn't move it.
 func (r *vmResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	warnReachReplace(ctx, r.data, req, resp)
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
-		return // create or destroy
+	if req.Plan.Raw.IsNull() {
+		return // destroy
+	}
+	planVMCores(ctx, req, resp)
+	if req.State.Raw.IsNull() || resp.Diagnostics.HasError() {
+		return // create
 	}
 	var plan, state vmResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if e := timeZoneChange(plan, state); e != nil && !replacing(ctx, req) {
+		resp.Diagnostics.AddAttributeError(path.Root("time_zone"), e[0], e[1])
 		return
 	}
 	if keys := configuredKeys(ctx, plan.SSHKeys); keys != nil && len(keys) == 0 && len(state.SSHKeys.Elements()) > 0 {
@@ -690,7 +814,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	wr := vmWrite{password: cfg.PasswordWO.ValueString(), create: true}
+	wr := vmWrite{password: cfg.PasswordWO.ValueString(), create: true, devices: cfg.Devices, portGroups: cfg.PortGroups}
 	if !plan.Stopped.ValueBool() {
 		wr.stopAfter = plan.StopAfter.ValueString()
 	}
@@ -699,7 +823,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	reach := reachOf(ctx, cfg.ReachableFrom)
 	reachBody(body, reach)
 	if err := r.data.Client.CreateWorkload(ctx, plan.workloadType(), body); err != nil {
-		apiDiag(&resp.Diagnostics, "Cannot create VM", err)
+		vmAPIDiag(&resp.Diagnostics, "Cannot create VM", err, plan)
 		return
 	}
 	if plan.Stopped.ValueBool() {
@@ -718,7 +842,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
-	refreshVMSpec(ctx, r.data.Client, &plan)
+	refreshVMSpec(ctx, r.data.Client, &plan, wr, &resp.Diagnostics)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, plan.Name.ValueString(), plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, plan.Name.ValueString(), "machine", plan.Database, vmBlock, &resp.Diagnostics)
@@ -772,6 +896,10 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 		}
 	}
 	readVMSizes(&state, sp)
+	readVMCores(&state, sp)
+	state.Devices = readVMDevices(sp)
+	state.TimeZone = refreshVMTimeZone(state.TimeZone, sp)
+	state.PortGroups = readPortGroups(sp)
 	if raw, ok := sp["allowCIDRs"].([]any); ok {
 		vals := make([]attr.Value, 0, len(raw))
 		for _, c := range raw {
@@ -810,15 +938,16 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		password = cfg.PasswordWO.ValueString()
 	}
 	reach := reachOf(ctx, cfg.ReachableFrom)
+	wr := vmWrite{password: password, stopAfter: stopAfterToSend(plan, state), devices: cfg.Devices, portGroups: cfg.PortGroups}
 	w := client.Workload{
 		ID:            plan.Name.ValueString(),
 		Type:          plan.workloadType(),
 		Stopped:       plan.Stopped.ValueBool(),
-		VM:            vmSpec(ctx, plan, vmWrite{password: password, stopAfter: stopAfterToSend(plan, state)}),
+		VM:            vmSpec(ctx, plan, wr),
 		ReachableFrom: reach,
 	}
 	if err := r.data.Client.UpdateWorkload(ctx, w.ID, w); err != nil {
-		apiDiag(&resp.Diagnostics, "Cannot update VM", err)
+		vmAPIDiag(&resp.Diagnostics, "Cannot update VM", err, plan)
 		return
 	}
 	createTimeout, td := plan.Timeouts.Create(ctx, plan.defaultWait())
@@ -829,7 +958,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		resp.Diagnostics.AddError("VM did not become ready after update", err.Error())
 	}
 	plan.PasswordWO = types.StringNull()
-	refreshVMSpec(ctx, r.data.Client, &plan)
+	refreshVMSpec(ctx, r.data.Client, &plan, wr, &resp.Diagnostics)
 	refreshVMStatus(ctx, r.data.Client, &plan, &resp.Diagnostics)
 	plan.ReachableFrom = settleReach(ctx, r.data.Client, w.ID, plan.ReachableFrom, reach, &resp.Diagnostics)
 	settleMachineDatabases(ctx, r.data.Client, w.ID, "machine", plan.Database, vmBlock, &resp.Diagnostics)
