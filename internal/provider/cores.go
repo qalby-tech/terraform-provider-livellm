@@ -228,8 +228,9 @@ func runningCPUModel(st *client.WorkloadStatus) types.String {
 const runningCPUModelDescription = "The CPU model of the server the running resource runs on, shared or " +
 	"dedicated cores (\"Intel Core i9-14900K\"). Null while it isn't running, and from a platform that doesn't say."
 
-// coresRefusals are the platform's answers when a machine's cores, or room
-// for any resource, can't be had, by its code (409, or 422 for
+// coresRefusals are the platform's answers when a machine's cores, too few
+// whole cores free to dedicate to a resource of any kind (cores_short), or
+// room for any resource, can't be had, by its code (409, or 422 for
 // core_speed_unknown): what the diagnostic is called and what to write
 // instead. The platform's own words come first in the detail (server_full
 // names the kind: "No server has room for this app."); the console's buttons
@@ -243,6 +244,13 @@ var coresRefusals = map[string]struct {
 	"core_speeds_mixed": {"Too few cores of one speed", useCoresOrMixed},
 	"core_speed_unknown": {"No cores at that speed", func(int) string {
 		return "Set core_speed to a speed the servers have, or to 0 for any cores of one speed."
+	}},
+	"cores_short": {"Too few dedicated cores free", func(fit int) string {
+		shared := "Or set dedicated_cores = false (shared cores), or stop another resource with dedicated cores, then apply again."
+		if fit <= 0 {
+			return "Set dedicated_cores = false (shared cores), or stop another resource with dedicated cores, then apply again."
+		}
+		return fmt.Sprintf("Use %s: set cpus = %d on a machine, cpu = \"%d\" on any other kind. %s", coresWord(fit), fit, fit, shared)
 	}},
 	"server_full": {"No room on the servers", func(int) string {
 		return "Stop or shrink another resource, or give this one fewer cores or less memory, then apply again."

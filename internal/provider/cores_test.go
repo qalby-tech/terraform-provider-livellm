@@ -372,6 +372,13 @@ func TestCoresRefusals(t *testing.T) {
 			"No room on the servers", []string{"This server is full: it has no room for this machine.", "fewer cores"}, nil},
 		{409, `{"error":"No server has room for this machine.","code":"server_full","workload":"ws"}`,
 			"No room on the servers", []string{"No server has room for this machine."}, nil},
+		{409, `{"error":"Only 4 dedicated cores are available.","code":"cores_short","workload":"web","cores":6,"fit":4}`,
+			"Too few dedicated cores free",
+			[]string{"Cannot create VM: Only 4 dedicated cores are available.", "Use 4 cores: set cpus = 4 on a machine, cpu = \"4\" on any other kind.",
+				"dedicated_cores = false"}, []string{"mixed_speeds"}},
+		{409, `{"error":"No dedicated cores are available.","code":"cores_short","workload":"web","cores":2,"fit":0}`,
+			"Too few dedicated cores free", []string{"No dedicated cores are available.", "Set dedicated_cores = false"},
+			[]string{"Use 0", "cpus =", "mixed_speeds"}},
 	} {
 		var diags diag.Diagnostics
 		apiDiag(&diags, "Cannot create VM", &client.APIError{Status: c.status, Body: c.body})
@@ -494,6 +501,8 @@ func TestCoresRefusalsMachineFloor(t *testing.T) {
 		{"desktop, mixed, 1 fits", desk, mixed, "Too few cores of one speed", []string{"mixed_speeds = true"}, []string{"Use 1 core", "cpus ="}},
 		{"desktop, 2 fit", desk, short(2), "Too few cores at that speed", []string{"Use 2 cores: set cpus = 2.", "mixed_speeds = true"}, nil},
 		{"server, 1 fits", server, short(1), "Too few cores at that speed", []string{"Use 1 core: set cpus = 1.", "mixed_speeds = true"}, nil},
+		{"desktop, 1 dedicated core free", desk, &client.APIError{Status: 409, Body: `{"error":"Only 1 dedicated core is available.","code":"cores_short","workload":"ws","cores":4,"fit":1}`},
+			"Too few dedicated cores free", []string{"Set dedicated_cores = false"}, []string{"Use 1 core", "cpus ="}},
 		{"desktop, no room", desk, &client.APIError{Status: 409, Body: `{"error":"No server has room for this machine.","code":"server_full","workload":"ws"}`},
 			"No room on the servers", []string{"No server has room for this machine.", "fewer cores"}, nil},
 		{"desktop, the plan's pool", desk, &client.APIError{Status: 402, Body: `{"error":"the plan's pool is used up"}`},

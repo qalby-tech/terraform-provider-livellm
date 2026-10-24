@@ -90,7 +90,10 @@
   has room for this machine.", the platform naming the kind: any resource,
   machine, app, database, object storage, browser, Browser API or Desktop
   App, that is new, started, grown or moved): stop or shrink another
-  resource, or ask for less.
+  resource, or ask for less; too few whole cores free to dedicate, for a
+  resource of any kind ("Only 4 dedicated cores are available."): `cpus` (a
+  machine) or `cpu` (any other kind) = the count it names, or
+  `dedicated_cores = false`.
 - `running_core_speed` and `running_mixed_speeds` (computed, on `livellm_vm`
   and on the `livellm_vm` and `livellm_vms` data sources), for dedicated
   cores only: the clock in MHz of the running machine's cores when they are

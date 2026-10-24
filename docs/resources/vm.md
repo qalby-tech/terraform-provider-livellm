@@ -213,6 +213,7 @@ what to write instead:
 | "No server has 20 free cores of one speed. Continue with cores of mixed speeds?" | `cpus` = the most of one speed that fit (the error names it), or `mixed_speeds = true` |
 | "No server this machine may run on has cores at 3 GHz." | a `core_speed` the servers have, or `0` for any one speed |
 | that dedicated cores come in pairs on these servers, naming the counts that fit | `cpus` = one of them |
+| "Only 4 dedicated cores are available." | `cpus = 4`, or `dedicated_cores = false` (shared cores) |
 
 `mixed_speeds = true` keeps the count with cores that may run at different
 speeds, and `running_mixed_speeds` then reads `true`; `false` asks for cores
