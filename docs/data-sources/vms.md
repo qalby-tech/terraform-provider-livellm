@@ -22,6 +22,10 @@ output "vm_urls" {
 output "all_ready" {
   value = alltrue([for vm in data.livellm_vms.all.vms : vm.ready])
 }
+
+output "private_addresses" {
+  value = { for vm in data.livellm_vms.all.vms : vm.id => vm.private_address if vm.private_network }
+}
 ```
 
 ## Schema
@@ -38,4 +42,7 @@ output "all_ready" {
   - `running_core_speed` (Number) Dedicated cores only: clock in MHz of the running VM's cores, when they are all of one speed; else null (always on shared cores, which have no clock).
   - `running_mixed_speeds` (Boolean) Dedicated cores only: `true` when the running VM's cores run at different clock speeds; null on shared cores, when it isn't running or the servers list no speeds.
   - `running_cpu_model` (String) The CPU model of the server the running VM runs on, shared or dedicated cores; null while it isn't running.
+  - `private_network` (Boolean) Whether the VM has a private address.
+  - `private_address` (String) The VM's private address, such as `172.16.0.12`; null on a VM without one.
+  - `private_mac` (String) The MAC of the VM's private card; null on a VM without a private address.
   - `endpoints` (List of Object) Every exposed port (`name`, `url`, `addr`, `tcp`, `udp`).

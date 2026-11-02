@@ -337,6 +337,63 @@ Those names are the machine's: the platform refuses another resource named
 `<machine>-host`, `<machine>-http`, `<machine>-internal` or `<machine>-rdp`
 next to it.
 
+### Private addresses
+
+Where the platform offers private addresses, every new machine gets one: a
+fixed address of its own (`172.16.0.12`) on a second network card (`enp2s0`
+on Linux), in a network only the workspace's machines share. It never
+changes, through restarts and moves, until the machine is deleted. Machines
+of the workspace reach each other at their private addresses on any port, as
+`reachable_from` allows; the first card stays as it is (the internet, SSH,
+published ports, names inside the workspace). Choose the address when the
+machine is made, or make the machine without one:
+
+```terraform
+data "livellm_workspace" "this" {}
+
+resource "livellm_vm" "vpn" {
+  name = "vpn"
+  # …credentials…
+
+  private_address = "172.16.0.20" # left out: the next free one
+}
+
+resource "livellm_vm" "worker" {
+  name = "worker"
+  # …credentials…
+
+  reachable_from = [livellm_vm.vpn.name]
+}
+
+resource "livellm_vm" "scratch" {
+  name = "scratch"
+  # …credentials…
+
+  private_network = false # one network card, no private address
+}
+
+output "range" { value = data.livellm_workspace.this.private_network.range }
+output "worker" { value = livellm_vm.worker.private_address }
+```
+
+`private_address` is inside the workspace's range (the
+[`livellm_workspace`](../data-sources/workspace.md) data source's
+`private_network`), not one of its first ten addresses nor its last, and not
+another machine's. `private_mac` is the private card's MAC, for Windows and
+setups by hand.
+
+Both are set when the machine is made and fixed for its life. Another
+`private_network` or `private_address` on an existing machine is an error at
+plan time, never a replacement; leaving them out keeps the machine as it is.
+To make the machine anew, taint it first (`tofu taint` or `terraform taint`)
+or rename it: `-replace` alone is refused while they differ. A deleted
+machine's address is free again within a minute or so (until then the apply
+says it is still being freed).
+
+What the platform refuses is said at apply in its words: an address outside
+the range, one of the network's own, another machine's, a range with no free
+address left, and a private address where the platform offers none.
+
 ## Schema
 
 ### Required
@@ -372,6 +429,8 @@ next to it.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
 - `allow_cidrs` (List of String) Source addresses (CIDRs) outside the workspace allowed to reach SSH and raw ports: omit for none, `0.0.0.0/0` for anyone. Who reaches the machine from inside the workspace is `reachable_from`.
 - `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. A replacement is a new resource: it starts from this attribute, and other resources lose its name (see [Replacing a resource](../index.md#replacing-a-resource)). Through a key, letting more in needs the **Network** permission, except between resources the key made itself or when this resource already lets the whole workspace in; setting `["*"]` always needs it (see [Inside the workspace](../index.md#inside-the-workspace)). `allow_cidrs` and public ports open nothing inside the workspace.
+- `private_network` (Boolean) Whether the machine has a private address: a fixed address of its own on a second network card (`enp2s0` on Linux), in a network only the workspace's machines share. Set when the machine is made: left out, it gets one wherever the platform offers private addresses; `false` makes it with one card. Fixed afterwards: another value on an existing machine is refused at plan time. See [Private addresses](#private-addresses).
+- `private_address` (String) The machine's private address, such as `172.16.0.12`. Asked for when the machine is made (left out: the next free one in the workspace's range), then fixed for the machine's life: another value on an existing machine is refused at plan time. Refused at plan time with `private_network = false`, or when it isn't one IPv4 address. Null on a machine without one.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
 - `placement_host` (String) Host id to pin to (`placement_strategy = "host"`); ids come from the [`livellm_hosts`](../data-sources/hosts.md) data source.
@@ -398,6 +457,7 @@ next to it.
 - `running_core_speed` (Number) Dedicated cores only: the clock in MHz of the cores the running machine got, when they are all of one speed. Null on shared cores (they have no clock), while it isn't running, when they run at different speeds, and where the servers list no speeds.
 - `running_mixed_speeds` (Boolean) Dedicated cores only: `true` when the running machine's cores run at different clock speeds (the console's "Mixed core speeds"), `false` when they are all of one speed. Null on shared cores (they have no clock), while it isn't running and where the servers list no speeds.
 - `running_cpu_model` (String) The CPU model of the server the running machine runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
+- `private_mac` (String) The MAC of the machine's private card, for Windows and setups by hand. Null on a machine without a private address.
 
 ## Import
 
@@ -405,4 +465,5 @@ next to it.
 terraform import livellm_vm.dev dev-box
 ```
 
-Import reads the machine's sizes, cores, devices, time zone and port groups.
+Import reads the machine's sizes, cores, devices, time zone, port groups and
+private address.

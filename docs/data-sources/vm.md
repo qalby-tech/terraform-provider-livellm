@@ -50,6 +50,9 @@ output "api_url" {
 - `running_core_speed` (Number) Dedicated cores only: the clock in MHz of the cores the running VM got, when they are all of one speed. Null on shared cores (they have no clock), while it isn't running, when they run at different speeds, and where the servers list no speeds.
 - `running_mixed_speeds` (Boolean) Dedicated cores only: `true` when the running VM's cores run at different clock speeds, `false` when they are all of one speed. Null on shared cores, while it isn't running and where the servers list no speeds.
 - `running_cpu_model` (String) The CPU model of the server the running VM runs on, shared or dedicated cores (`"Intel Core i9-14900K"`). Null while it isn't running, and from a platform that doesn't say.
+- `private_network` (Boolean) Whether the VM has a private address: a fixed address of its own on a second network card, in a network only the workspace's machines share.
+- `private_address` (String) The VM's private address, such as `172.16.0.12`. Null on a VM without one.
+- `private_mac` (String) The MAC of the VM's private card, for Windows and setups by hand. Null on a VM without a private address.
 - `endpoints` (List of Object) Every exposed port:
   - `name` (String) Port name.
   - `url` (String) Public HTTPS URL — HTTP ports.

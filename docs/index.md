@@ -97,7 +97,11 @@ A machine answers inside the workspace at `<workspace>-<name>` (SSH and its
 `tcp` and `udp` ports) and at `<workspace>-<name>-host`, the machine itself on
 every port, TCP and UDP; the platform refuses another resource named
 `<machine>-host`, `-http`, `-internal` or `-rdp` next to the machine (see
-[`livellm_vm`](resources/vm.md)).
+[`livellm_vm`](resources/vm.md)). Where the platform offers private
+addresses, a machine also has a fixed private address of its own on a second
+network card, and the workspace's machines reach each other there on any
+port, as `reachable_from` allows (see
+[Private addresses](resources/vm.md#private-addresses)).
 
 A caller that is let in reaches every port of the resource. Public addresses
 keep their own settings: `allow_cidrs`, `allowlist` and public ports open

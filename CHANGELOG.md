@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.20.0
+
+- **Private addresses.** Where the platform offers them, every new
+  `livellm_vm` gets a fixed private address of its own (`172.16.0.12`) on a
+  second network card (`enp2s0` on Linux), in a network only the
+  workspace's machines share; they reach each other there on any port, as
+  `reachable_from` allows. `private_address` chooses it when the machine is
+  made (left out: the next free one), `private_network = false` makes the
+  machine with one card, and `private_mac` (computed) is the private card's
+  MAC, for Windows and setups by hand. Both are optional and computed: left
+  out, a new machine gets what the platform decides and an existing one
+  keeps what it has, so the plan stays clean.
+- **Fixed when a machine is made.** Another `private_network` or
+  `private_address` on an existing machine is an error at plan time ("A
+  machine's private address is set when it is made"), never a replacement,
+  which would delete the disk. To make a machine anew with another, taint it
+  (or rename it) first: `-replace` alone is refused while they differ. They
+  are sent on the create alone; a later apply leaves them out and the
+  machine keeps them. `private_address` that isn't one IPv4 address, or set
+  with `private_network = false`, is an error at plan time.
+- What the platform refuses is said at apply in its words, with what to do
+  next: an address outside the workspace's range, one of the network's own
+  (the range's first ten and its last), another machine's, one a deleted
+  machine still holds while it is freed (apply again in a minute), a range
+  with no address left, and a private address where the platform offers
+  none.
+- `private_network`, `private_address` and `private_mac` (computed) on the
+  `livellm_vm` and `livellm_vms` data sources, and `private_network`
+  (`range`, `gateway`; null where private addresses aren't offered) on the
+  `livellm_workspace` data source.
+- Import and refresh read a machine's private address.
+- Needs LiveLLM API 0.90 or newer. An older API says nothing about private
+  addresses: `private_network` reads `false` on a new machine and the
+  workspace's `private_network` null, a refresh keeps what state holds, and
+  a value an older API ignores warns ("Private network not kept as
+  written", "Private address not kept as written"); the plan stays clean.
+  Nothing changes for a configuration that sets neither.
+
 ## 0.19.0
 
 - **Devices.** `livellm_vm` takes `devices`: the cluster's devices by id (a
