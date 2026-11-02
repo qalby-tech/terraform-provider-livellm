@@ -1,7 +1,7 @@
 ---
 page_title: "livellm_vm Resource - livellm"
 description: |-
-  A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server — with ports, a stop time, placement, dedicated cores, devices and port groups.
+  A machine — an Ubuntu terminal or desktop, a Debian or Fedora server, or Windows 11 or Windows Server — with ports, a stop time, placement, dedicated cores, devices, port groups and a private address.
 ---
 
 # livellm_vm (Resource)
