@@ -54,8 +54,8 @@ func withPrivateAddress(attrs map[string]schema.Attribute) {
 		Computed: true,
 		Description: "Whether the machine has a private address: a fixed address of its own on a second network card " +
 			"(enp2s0 on Linux), in a network only the workspace's machines share. Set when the machine is made: left " +
-			"out, it gets one wherever the platform offers private addresses; false makes it with one card. After " +
-			"that it is fixed: another value on an existing machine is refused at plan time.",
+			"out, it gets one wherever the platform offers private addresses (to Windows only where it says so); " +
+			"false makes it with one card. After that it is fixed: another value on an existing machine is refused at plan time.",
 		PlanModifiers: []planmodifier.Bool{keepOrPlatform{}},
 	}
 	attrs["private_address"] = schema.StringAttribute{

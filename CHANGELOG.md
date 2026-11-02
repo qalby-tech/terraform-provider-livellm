@@ -3,7 +3,7 @@
 ## 0.20.0
 
 - **Private addresses.** Where the platform offers them, every new
-  `livellm_vm` gets a fixed private address of its own (`172.16.0.12`) on a
+  `livellm_vm` (Windows only where the platform says so) gets a fixed private address of its own (`172.16.0.12`) on a
   second network card (`enp2s0` on Linux), in a network only the
   workspace's machines share; they reach each other there on any port, as
   `reachable_from` allows. `private_address` chooses it when the machine is

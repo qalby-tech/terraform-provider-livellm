@@ -339,9 +339,10 @@ next to it.
 
 ### Private addresses
 
-Where the platform offers private addresses, every new machine gets one: a
-fixed address of its own (`172.16.0.12`) on a second network card (`enp2s0`
-on Linux), in a network only the workspace's machines share. It never
+Where the platform offers private addresses, every new machine gets one
+(Windows only where the platform says so): a fixed address of its own
+(`172.16.0.12`) on a second network card (`enp2s0` on Linux), in a network
+only the workspace's machines share. It never
 changes, through restarts and moves, until the machine is deleted. Machines
 of the workspace reach each other at their private addresses on any port, as
 `reachable_from` allows; the first card stays as it is (the internet, SSH,
@@ -429,7 +430,7 @@ address left, and a private address where the platform offers none.
 - `stop_after` (String) Have the platform stop this machine after a while: a length of time such as `4h`, `90m` or `2h30m` (a minute to 30 days). See the example above for when the clock starts. Remove it to clear the stop time.
 - `allow_cidrs` (List of String) Source addresses (CIDRs) outside the workspace allowed to reach SSH and raw ports: omit for none, `0.0.0.0/0` for anyone. Who reaches the machine from inside the workspace is `reachable_from`.
 - `reachable_from` (List of String) Which other resources of the workspace may connect to this one: their names, or `["*"]` for the whole workspace, also resources made later (`"*"` goes alone). Left out when creating: none. Removing it later keeps the value the resource has; `[]` closes it. A replacement is a new resource: it starts from this attribute, and other resources lose its name (see [Replacing a resource](../index.md#replacing-a-resource)). Through a key, letting more in needs the **Network** permission, except between resources the key made itself or when this resource already lets the whole workspace in; setting `["*"]` always needs it (see [Inside the workspace](../index.md#inside-the-workspace)). `allow_cidrs` and public ports open nothing inside the workspace.
-- `private_network` (Boolean) Whether the machine has a private address: a fixed address of its own on a second network card (`enp2s0` on Linux), in a network only the workspace's machines share. Set when the machine is made: left out, it gets one wherever the platform offers private addresses; `false` makes it with one card. Fixed afterwards: another value on an existing machine is refused at plan time. See [Private addresses](#private-addresses).
+- `private_network` (Boolean) Whether the machine has a private address: a fixed address of its own on a second network card (`enp2s0` on Linux), in a network only the workspace's machines share. Set when the machine is made: left out, it gets one wherever the platform offers private addresses (to Windows only where it says so); `false` makes it with one card. Fixed afterwards: another value on an existing machine is refused at plan time. See [Private addresses](#private-addresses).
 - `private_address` (String) The machine's private address, such as `172.16.0.12`. Asked for when the machine is made (left out: the next free one in the workspace's range), then fixed for the machine's life: another value on an existing machine is refused at plan time. Refused at plan time with `private_network = false`, or when it isn't one IPv4 address. Null on a machine without one.
 - `placement_strategy` (String) Where it runs: omit for automatic (the default; LiveLLM picks the host), `region` for any host in `placement_region`, `host` to pin `placement_host`. Changing it restarts the resource where it now belongs. A resource pinned to a host waits for that host while it is down.
 - `placement_region` (String) Region to run in (`placement_strategy = "region"`).
