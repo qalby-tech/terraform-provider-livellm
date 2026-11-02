@@ -58,6 +58,9 @@ func (d *vmDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, res
 					"list no speeds.",
 			},
 			"running_cpu_model": schema.StringAttribute{Computed: true, Description: runningCPUModelDescription},
+			"private_network":   schema.BoolAttribute{Computed: true, Description: privateNetworkReadDescription},
+			"private_address":   schema.StringAttribute{Computed: true, Description: privateAddressReadDescription},
+			"private_mac":       schema.StringAttribute{Computed: true, Description: privateMacReadDescription},
 			"endpoints": schema.ListNestedAttribute{
 				Computed:    true,
 				Description: "Every exposed port. HTTP ports carry url; raw TCP/UDP ports carry addr (host:port) instead.",
@@ -97,8 +100,19 @@ type vmModel struct {
 	RunningCoreSpeed types.Int64  `tfsdk:"running_core_speed"`
 	RunningMixed     types.Bool   `tfsdk:"running_mixed_speeds"`
 	RunningCPUModel  types.String `tfsdk:"running_cpu_model"`
+	PrivateNetwork   types.Bool   `tfsdk:"private_network"`
+	PrivateAddress   types.String `tfsdk:"private_address"`
+	PrivateMac       types.String `tfsdk:"private_mac"`
 	Endpoints        types.List   `tfsdk:"endpoints"`
 }
+
+// What the data sources say about a machine's private address.
+const (
+	privateNetworkReadDescription = "Whether the VM has a private address: a fixed address of its own on a second " +
+		"network card, in a network only the workspace's machines share."
+	privateAddressReadDescription = "The VM's private address, such as 172.16.0.12. Null on a VM without one."
+	privateMacReadDescription     = "The MAC of the VM's private card, for Windows and setups by hand. Null on a VM without a private address."
+)
 
 type endpointModel struct {
 	Name types.String `tfsdk:"name"`
@@ -120,6 +134,11 @@ func (d *vmDataSource) Read(ctx context.Context, req datasource.ReadRequest, res
 		resp.Diagnostics.AddError("Cannot read workspace status", err.Error())
 		return
 	}
+	settings, err := machineSettings(ctx, d.data.Client)
+	if err != nil {
+		resp.Diagnostics.AddError("Cannot read workspace", err.Error())
+		return
+	}
 	id := cfg.ID.ValueString()
 	for _, w := range st.Workloads {
 		if w.ID != id {
@@ -132,7 +151,7 @@ func (d *vmDataSource) Read(ctx context.Context, req datasource.ReadRequest, res
 			)
 			return
 		}
-		state, diags := vmModelFrom(ctx, w)
+		state, diags := vmModelFrom(ctx, w, settings[w.ID])
 		resp.Diagnostics.Append(diags.Errors()...)
 		if resp.Diagnostics.HasError() {
 			return

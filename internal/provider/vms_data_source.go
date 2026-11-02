@@ -51,6 +51,9 @@ func (d *vmsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, re
 							Description: "Dedicated cores only: true when the running VM's cores run at different clock speeds; null on shared cores, when not running or no speeds are listed.",
 						},
 						"running_cpu_model": schema.StringAttribute{Computed: true, Description: runningCPUModelDescription},
+						"private_network":   schema.BoolAttribute{Computed: true, Description: privateNetworkReadDescription},
+						"private_address":   schema.StringAttribute{Computed: true, Description: privateAddressReadDescription},
+						"private_mac":       schema.StringAttribute{Computed: true, Description: privateMacReadDescription},
 						"endpoints": schema.ListNestedAttribute{
 							Computed:    true,
 							Description: "Every exposed port (url for HTTP, addr for raw TCP/UDP).",
@@ -93,6 +96,9 @@ var vmObjAttrTypes = map[string]attr.Type{
 	"running_core_speed":   types.Int64Type,
 	"running_mixed_speeds": types.BoolType,
 	"running_cpu_model":    types.StringType,
+	"private_network":      types.BoolType,
+	"private_address":      types.StringType,
+	"private_mac":          types.StringType,
 	"endpoints":            types.ListType{ElemType: types.ObjectType{AttrTypes: endpointAttrTypes}},
 }
 
@@ -100,9 +106,26 @@ type vmsModel struct {
 	VMs types.List `tfsdk:"vms"`
 }
 
-// vmModelFrom converts one status row into the shared vm object model.
-// Used by both data sources so the shapes can never drift apart.
-func vmModelFrom(ctx context.Context, w client.WorkloadStatus) (vmModel, diag.Diagnostics) {
+// machineSettings is every machine's settings block by id, from the
+// workspace's spec: what the status rows don't carry (its private address).
+func machineSettings(ctx context.Context, c *client.Client) (map[string]map[string]any, error) {
+	ws, err := c.Workloads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[string]any, len(ws))
+	for _, w := range ws {
+		if w.VM != nil {
+			out[w.ID] = w.VM
+		}
+	}
+	return out, nil
+}
+
+// vmModelFrom converts one status row, and the machine's settings (nil when
+// the workspace doesn't list them), into the shared vm object model. Used by
+// both data sources so the shapes can never drift apart.
+func vmModelFrom(ctx context.Context, w client.WorkloadStatus, sp map[string]any) (vmModel, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	eps := make([]endpointModel, 0, len(w.Endpoints))
 	url := ""
@@ -121,6 +144,7 @@ func vmModelFrom(ctx context.Context, w client.WorkloadStatus) (vmModel, diag.Di
 	epList, d := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: endpointAttrTypes}, eps)
 	diags.Append(d...)
 	speed, mixed := runningCores(&w)
+	private := readVMPrivate(sp)
 	return vmModel{
 		ID:               types.StringValue(w.ID),
 		Type:             types.StringValue(w.Type),
@@ -131,6 +155,9 @@ func vmModelFrom(ctx context.Context, w client.WorkloadStatus) (vmModel, diag.Di
 		RunningCoreSpeed: speed,
 		RunningMixed:     mixed,
 		RunningCPUModel:  runningCPUModel(&w),
+		PrivateNetwork:   private.network,
+		PrivateAddress:   private.address,
+		PrivateMac:       private.mac,
 		Endpoints:        epList,
 	}, diags
 }
@@ -141,12 +168,17 @@ func (d *vmsDataSource) Read(ctx context.Context, _ datasource.ReadRequest, resp
 		resp.Diagnostics.AddError("Cannot read workspace status", err.Error())
 		return
 	}
+	settings, err := machineSettings(ctx, d.data.Client)
+	if err != nil {
+		resp.Diagnostics.AddError("Cannot read workspace", err.Error())
+		return
+	}
 	vms := make([]vmModel, 0)
 	for _, w := range st.Workloads {
 		if !strings.HasPrefix(w.Type, "vm-") {
 			continue
 		}
-		m, diags := vmModelFrom(ctx, w)
+		m, diags := vmModelFrom(ctx, w, settings[w.ID])
 		resp.Diagnostics.Append(diags.Errors()...)
 		if resp.Diagnostics.HasError() {
 			return

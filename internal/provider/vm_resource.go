@@ -283,6 +283,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 		},
 	}
 	withPlacement(resp.Schema.Attributes)
+	withPrivateAddress(resp.Schema.Attributes)
 	withReach(resp.Schema.Attributes, "allow_cidrs and public ports open nothing inside the workspace: they are for "+
 		"addresses outside it.", false)
 }
@@ -337,6 +338,9 @@ type vmResourceModel struct {
 	PlacementHost     types.String   `tfsdk:"placement_host"`
 	PlacementRegion   types.String   `tfsdk:"placement_region"`
 	ReachableFrom     types.List     `tfsdk:"reachable_from"`
+	PrivateNetwork    types.Bool     `tfsdk:"private_network"`
+	PrivateAddress    types.String   `tfsdk:"private_address"`
+	PrivateMac        types.String   `tfsdk:"private_mac"`
 	Ready             types.Bool     `tfsdk:"ready"`
 	RunningCoreSpeed  types.Int64    `tfsdk:"running_core_speed"`
 	RunningMixed      types.Bool     `tfsdk:"running_mixed_speeds"`
@@ -362,6 +366,9 @@ func (r *vmResource) ValidateConfig(ctx context.Context, req resource.ValidateCo
 		resp.Diagnostics.AddAttributeError(path.Root("backup"), e[0], e[1])
 	}
 	for _, e := range windowsConfigErrors(cfg) {
+		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
+	}
+	for _, e := range privateConfigErrors(cfg) {
 		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
 	}
 	for _, e := range sharedCoreErrors(cfg.DedicatedCores, cfg.MixedSpeeds, cfg.CoreSpeed) {
@@ -585,6 +592,9 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 	}
 	vmCoresSpec(m, spec)
 	vmTimeZoneSpec(m, spec)
+	if wr.create {
+		vmPrivateSpec(m, spec)
+	}
 	vmDevicesSpec(wr.devices, spec)
 	if groups := portGroupsSpec(ctx, wr.portGroups); groups != nil {
 		spec["portGroups"] = groups
@@ -682,8 +692,9 @@ func refreshVMStatus(ctx context.Context, c *client.Client, m *vmResourceModel, 
 
 // refreshVMSpec reads back what the platform decides: when the machine will
 // stop, its keys when the configuration leaves them alone, its groups'
-// offsets; it warns when the platform didn't keep the machine's cores,
-// devices, groups or time zone as the write (wr) sent them.
+// offsets, its private address; it warns when the platform didn't keep the
+// machine's cores, devices, groups, time zone or private address as the
+// write (wr) sent them.
 func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, wr vmWrite, diags *diag.Diagnostics) {
 	var w *client.Workload
 	if ws, err := c.Workloads(ctx); err == nil {
@@ -702,6 +713,7 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, wr
 		if m.TimeZone.IsUnknown() {
 			m.TimeZone = types.StringNull()
 		}
+		settleVMPrivate(m, nil, diags)
 		return
 	}
 	m.ExpiresAt = types.StringValue(w.ExpiresAt)
@@ -714,6 +726,7 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, wr
 	settleVMDevices(m, w.VM, sentDevices, diags)
 	settleVMPortGroups(ctx, m, w.VM, sentGroups, diags)
 	settleVMTimeZone(m, w.VM, diags)
+	settleVMPrivate(m, w.VM, diags)
 }
 
 // readVMSizes fills the machine's sizes from the platform's copy: the
@@ -774,8 +787,8 @@ func sameKeys(a, b []string) bool {
 	return true
 }
 
-// ModifyPlan settles the cores against dedicated_cores, refuses the one
-// change the platform can't make, and keeps expires_at quiet on an apply that
+// ModifyPlan settles the cores against dedicated_cores, refuses the changes
+// the platform can't make (a time zone, a private address), and keeps expires_at quiet on an apply that
 // doesn't move it.
 func (r *vmResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	warnReachReplace(ctx, r.data, req, resp)
@@ -794,6 +807,10 @@ func (r *vmResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequ
 	}
 	if e := timeZoneChange(plan, state); e != nil && !replacing(ctx, req) {
 		resp.Diagnostics.AddAttributeError(path.Root("time_zone"), e[0], e[1])
+		return
+	}
+	if e := privateChange(plan, state); e != nil && !replacing(ctx, req) {
+		resp.Diagnostics.AddAttributeError(path.Root(e[0]), e[1], e[2])
 		return
 	}
 	if keys := configuredKeys(ctx, plan.SSHKeys); keys != nil && len(keys) == 0 && len(state.SSHKeys.Elements()) > 0 {
@@ -899,6 +916,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	readVMCores(&state, sp)
 	state.Devices = readVMDevices(sp)
 	state.TimeZone = refreshVMTimeZone(state.TimeZone, sp)
+	refreshVMPrivate(&state, sp)
 	state.PortGroups = readPortGroups(sp)
 	if raw, ok := sp["allowCIDRs"].([]any); ok {
 		vals := make([]attr.Value, 0, len(raw))

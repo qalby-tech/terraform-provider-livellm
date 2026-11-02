@@ -558,13 +558,13 @@ func TestRunningCores(t *testing.T) {
 		}
 	}
 	m, d := vmModelFrom(context.Background(), client.WorkloadStatus{ID: "box", Type: "vm-ubuntu", Ready: true,
-		Cores: &client.CoreStatus{SpeedMHz: 4400, Model: i9}})
+		Cores: &client.CoreStatus{SpeedMHz: 4400, Model: i9}}, nil)
 	if d.HasError() || !m.RunningCoreSpeed.Equal(types.Int64Value(4400)) || !m.RunningMixed.Equal(types.BoolValue(false)) ||
 		!m.RunningCPUModel.Equal(types.StringValue(i9)) {
 		t.Errorf("data source: %v %v %v %v", m.RunningCoreSpeed, m.RunningMixed, m.RunningCPUModel, d)
 	}
 	m, d = vmModelFrom(context.Background(), client.WorkloadStatus{ID: "box", Type: "vm-ubuntu", Ready: true,
-		Cores: &client.CoreStatus{Model: i9}})
+		Cores: &client.CoreStatus{Model: i9}}, nil)
 	if d.HasError() || !m.RunningCoreSpeed.IsNull() || !m.RunningMixed.IsNull() || !m.RunningCPUModel.Equal(types.StringValue(i9)) {
 		t.Errorf("data source, shared: %v %v %v %v", m.RunningCoreSpeed, m.RunningMixed, m.RunningCPUModel, d)
 	}

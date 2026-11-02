@@ -133,6 +133,16 @@ type Workspace struct {
 	Name  string `json:"name"`
 	Plan  string `json:"plan"`
 	Owner string `json:"owner"`
+	// PrivateNetwork is the network its machines with a private address
+	// share; nil where the platform offers none (and from an older one).
+	PrivateNetwork *PrivateNetwork `json:"privateNetwork,omitempty"`
+}
+
+// PrivateNetwork is a workspace's private network: its range and its
+// gateway (the network's own; no machine routes through it).
+type PrivateNetwork struct {
+	Range   string `json:"range"`
+	Gateway string `json:"gateway"`
 }
 
 // MyWorkspace resolves the key's workspace — also the provider's auth check.

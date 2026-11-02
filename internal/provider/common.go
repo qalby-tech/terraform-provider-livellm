@@ -36,6 +36,12 @@ func apiDiag(diags *diag.Diagnostics, summary string, err error) {
 	if errors.As(err, &apiErr) && coresDiag(diags, summary, apiErr, 1) {
 		return
 	}
+	if errors.As(err, &apiErr) && (apiErr.Status == 409 || apiErr.Status == 422) {
+		if r, ok := privateRefusals[apiErr.Code()]; ok {
+			diags.AddError(r.summary, fmt.Sprintf("%s: %s\n\n%s", summary, apiErr.Message(), r.next))
+			return
+		}
+	}
 	if errors.As(err, &apiErr) && (apiErr.Status == 402 || apiErr.Status == 403) {
 		if b, ok := billingRefusals[apiErr.Code()]; ok {
 			diags.AddError(b.summary, fmt.Sprintf("%s: %s\n\n%s", summary, apiErr.Message(), b.next))
