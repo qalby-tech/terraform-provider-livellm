@@ -8,12 +8,15 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -97,35 +100,84 @@ func (e *APIError) Count(key string) (int, bool) {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
-	var body io.Reader
+	var payload []byte
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
 			return err
 		}
-		body = strings.NewReader(string(b))
+		payload = b
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.endpoint+path, body)
-	if err != nil {
-		return err
+	for try := 0; ; try++ {
+		var body io.Reader
+		if payload != nil {
+			body = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, c.endpoint+path, body)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("x-api-key", c.apiKey)
+		if in != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		res, err := c.http.Do(req)
+		if err != nil {
+			return err
+		}
+		raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		res.Body.Close()
+		// Too many requests (the API's request limits, api 0.92): wait as
+		// long as Retry-After says, plus jitter, and send it again.
+		// Only the request limits' own 429 (rate_limited) clears by waiting:
+		// a counter's is the error as it came.
+		if res.StatusCode == http.StatusTooManyRequests && try < RetryTries &&
+			(&APIError{Body: string(raw)}).Code() == "rate_limited" {
+			if wait, ok := RetryWait(res.Header.Get("Retry-After"), try+1); ok {
+				t := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					return ctx.Err()
+				case <-t.C:
+				}
+				continue
+			}
+		}
+		if res.StatusCode < 200 || res.StatusCode > 299 {
+			return &APIError{Status: res.StatusCode, Body: strings.TrimSpace(string(raw))}
+		}
+		if out != nil {
+			return json.Unmarshal(raw, out)
+		}
+		return nil
 	}
-	req.Header.Set("x-api-key", c.apiKey)
-	if in != nil {
-		req.Header.Set("Content-Type", "application/json")
+}
+
+// Retrying a 429 (the API's request limits answer 429 rate_limited with
+// Retry-After): at most RetryTries more sends, none waiting past
+// RetryMaxWait; a longer Retry-After is passed on as the error at once.
+const (
+	RetryTries   = 6
+	RetryMaxWait = 60 * time.Second
+)
+
+// RetryWait is how long to wait before try (1, 2, …): Retry-After's seconds
+// (1 s, then doubling, when it is missing or unreadable) plus up to a
+// quarter more of jitter, so Terraform's parallel applies don't come back at
+// once. ok false: wait no longer.
+func RetryWait(header string, try int) (time.Duration, bool) {
+	d := time.Duration(1<<(try-1)) * time.Second
+	if n, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && n >= 0 {
+		d = time.Duration(n) * time.Second
 	}
-	res, err := c.http.Do(req)
-	if err != nil {
-		return err
+	if d > RetryMaxWait {
+		return 0, false
 	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return &APIError{Status: res.StatusCode, Body: strings.TrimSpace(string(raw))}
+	if d < 200*time.Millisecond {
+		d = 200 * time.Millisecond
 	}
-	if out != nil {
-		return json.Unmarshal(raw, out)
-	}
-	return nil
+	return d + time.Duration(rand.Int64N(int64(d/4)+1)), true
 }
 
 // Workspace is the one workspace an llc_ key belongs to (GET /v1/workspace).

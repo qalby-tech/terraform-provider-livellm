@@ -2,9 +2,12 @@ package client
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // A delete whose answer never comes back is looked at again: a workload gone
@@ -92,5 +95,81 @@ func TestStatusCores(t *testing.T) {
 	}
 	if c := st.Workloads[3].Cores; c == nil || c.SpeedMHz != 0 || c.Mixed || c.Model != "AMD EPYC 9654" {
 		t.Errorf("shared: %+v", c)
+	}
+}
+
+// A 429 is sent again after Retry-After, body and all; past the tries, or a
+// Retry-After past a minute, it is the error.
+func TestRetryOn429(t *testing.T) {
+	var calls int
+	var bodies []string
+	limit, after := 2, "0"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		if calls <= limit {
+			w.Header().Set("Retry-After", after)
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":"Too many requests. Try again shortly.","code":"rate_limited"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"acme"}`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "llc_test")
+	var out map[string]any
+	if err := c.do(context.Background(), "POST", "/v1/workloads", map[string]string{"id": "web"}, &out); err != nil {
+		t.Fatalf("after two 429s: %v", err)
+	}
+	if calls != 3 || out["name"] != "acme" {
+		t.Fatalf("%d calls, %v", calls, out)
+	}
+	for _, b := range bodies {
+		if b != `{"id":"web"}` {
+			t.Fatalf("a retry sent %q", b)
+		}
+	}
+	calls, limit = 0, 100
+	err := c.do(context.Background(), "GET", "/v1/status", nil, nil)
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 429 || ae.Code() != "rate_limited" || calls != RetryTries+1 {
+		t.Fatalf("past the tries: %v after %d calls", err, calls)
+	}
+	calls, after = 0, "900"
+	if err := c.do(context.Background(), "GET", "/v1/status", nil, nil); !errors.As(err, &ae) || calls != 1 {
+		t.Fatalf("Retry-After 900: %v after %d calls; want the error at once", err, calls)
+	}
+	// Another 429 (a counter's) is the error at once.
+	calls, after = 0, "1"
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(`{"error":"Too many tries.","code":"billing_rate"}`))
+	}))
+	defer other.Close()
+	if err := New(other.URL, "k").do(context.Background(), "PUT", "/v1/subscription", nil, nil); !errors.As(err, &ae) || calls != 1 {
+		t.Fatalf("billing_rate: %v after %d calls; want it at once", err, calls)
+	}
+	calls = 0
+	// A cancelled apply stops waiting.
+	calls, after = 0, "30"
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := c.do(ctx, "GET", "/v1/status", nil, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cancelled: %v", err)
+	}
+}
+
+func TestRetryWait(t *testing.T) {
+	if d, ok := RetryWait("3", 1); !ok || d < 3*time.Second || d > 3750*time.Millisecond {
+		t.Fatalf("3: %v %v", d, ok)
+	}
+	if d, ok := RetryWait("", 3); !ok || d < 4*time.Second || d > 5*time.Second {
+		t.Fatalf("none, try 3: %v %v", d, ok)
+	}
+	if _, ok := RetryWait("61", 1); ok {
+		t.Fatal("61 s was waited")
 	}
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Too many requests.** When the platform answers 429 `rate_limited` (its
+  request limits, api 0.92; any other 429 is the error as it came), the
+  provider waits as long as `Retry-After` says, plus a little
+  jitter so parallel applies don't all come back at once, and sends the
+  request again, up to 6 more times; a wait over a minute is the error at
+  once. A cancelled apply stops waiting.
+
 ## 0.20.0
 
 - **Private addresses.** Where the platform offers them, every new
