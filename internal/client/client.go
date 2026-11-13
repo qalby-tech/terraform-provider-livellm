@@ -426,3 +426,53 @@ func (c *Client) MachineDevices(ctx context.Context) ([]MachineDevice, error) {
 	}
 	return out.Devices, nil
 }
+
+// --- Alert settings ---------------------------------------------------------
+
+// AlertSetting is one kind of alert on a resource: mode usual (the
+// platform's level; on, for down and gpu), level (Level, a whole percent
+// from 50 to 99: cpu, memory and disk only) or off.
+type AlertSetting struct {
+	Mode  string `json:"mode"`
+	Level int    `json:"level,omitempty"`
+}
+
+// AlertSettings is a resource's alert settings (GET
+// /v1/workloads/{id}/alert-settings): the platform's usual levels, the kinds
+// of alert that apply to the resource, and each kind's setting.
+type AlertSettings struct {
+	Usual    map[string]float64      `json:"usual"`
+	Kinds    []string                `json:"kinds"`
+	Settings map[string]AlertSetting `json:"settings"`
+}
+
+// AlertSettings reads a resource's alert settings.
+func (c *Client) AlertSettings(ctx context.Context, id string) (*AlertSettings, error) {
+	var s AlertSettings
+	if err := c.do(ctx, http.MethodGet, "/v1/workloads/"+id+"/alert-settings", nil, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// SetAlertSettings changes the kinds named in settings (a kind left out
+// keeps what it has; usual puts one back) and answers the settings as saved.
+func (c *Client) SetAlertSettings(ctx context.Context, id string, settings map[string]AlertSetting) (*AlertSettings, error) {
+	var s AlertSettings
+	body := map[string]any{"settings": settings}
+	if err := c.do(ctx, http.MethodPut, "/v1/workloads/"+id+"/alert-settings", body, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// RouteMissing says whether a 404 came from a platform that has no such
+// route at all (its router's plain answer) rather than from the route itself,
+// which names what it didn't find in a JSON error.
+func (e *APIError) RouteMissing() bool {
+	if e.Status != http.StatusNotFound {
+		return false
+	}
+	var b map[string]any
+	return json.Unmarshal([]byte(e.Body), &b) != nil
+}

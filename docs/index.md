@@ -52,6 +52,7 @@ configuration; keys are secrets.
 | [`livellm_browser`](resources/browser.md) | A browser with a live view: Chrome (CDP) or Camoufox (Playwright); locale, time zone and rotating proxies |
 | [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers, Chrome and Camoufox together |
 | [`livellm_desktop_app`](resources/desktop_app.md) | A Linux desktop in a container that starts in seconds |
+| [`livellm_alert_settings`](resources/alert_settings.md) | Which alerts one resource gets (down, CPU, memory, disk, GPU) and at what level |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md),

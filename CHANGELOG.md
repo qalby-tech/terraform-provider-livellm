@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.22.0
+
+- **Alert settings.** `livellm_alert_settings` sets which alerts one
+  resource gets on the Monitoring page: `down` and `gpu` `on` or `off`;
+  `cpu`, `memory` and `disk` `usual`, `off` or the resource's own level, a
+  whole percent from 50 to 99 (`"95"`), each checked at plan time. Only the
+  kinds written are managed: a kind left out keeps what it has and never
+  shows as a change; one removed from the configuration goes back to the
+  usual, and deleting the resource puts every kind back. When the resource is
+  made again the platform starts it with the usual alerts: the next plan
+  shows it and the apply puts the settings back. A kind that doesn't apply to
+  the resource is refused at apply naming it; a member's key or an agent
+  sign-in is refused in the platform's words. Import takes every kind that
+  isn't the usual.
+- Needs LiveLLM API 0.101.5 or newer; an older server says "Alert settings
+  aren't available on this server".
+
+## 0.21.0
 
 - **Too many requests.** When the platform answers 429 `rate_limited` (its
   request limits, api 0.92; any other 429 is the error as it came), the

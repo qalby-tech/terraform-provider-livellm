@@ -173,3 +173,19 @@ func TestRetryWait(t *testing.T) {
 		t.Fatal("61 s was waited")
 	}
 }
+
+// A 404 from the router (plain text) is a platform without the route; the
+// route's own 404 names what it didn't find in JSON.
+func TestRouteMissing(t *testing.T) {
+	for body, want := range map[string]bool{
+		"404 page not found":                  true,
+		`{"error":"workload not found: dev"}`: false,
+	} {
+		if got := (&APIError{Status: 404, Body: body}).RouteMissing(); got != want {
+			t.Errorf("%q: %v, want %v", body, got, want)
+		}
+	}
+	if (&APIError{Status: 403, Body: "forbidden"}).RouteMissing() {
+		t.Error("a 403 is never a missing route")
+	}
+}
