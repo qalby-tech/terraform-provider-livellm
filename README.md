@@ -64,9 +64,10 @@ Manage the core of a workspace as code today:
 | `livellm_browser_api` | One address that drives several browsers, Chrome and Camoufox together: fewest open tabs, sessions, or a named browser |
 | `livellm_desktop_app` | A Linux desktop in a container that starts in seconds, one for each agent or task |
 | `livellm_alert_settings` | Which alerts one resource gets (down, CPU, memory, disk, GPU) and at what level |
+| `livellm_gpu_rental` | A GPU, or a cluster of GPUs on one server, rented by the hour or booked for later, for a machine or shared by apps |
 
 Data sources: `livellm_workspace`, `livellm_vm`, `livellm_vms`, `livellm_hosts`,
-`livellm_machine_cores`, `livellm_machine_devices`.
+`livellm_machine_cores`, `livellm_machine_devices`, `livellm_gpu_models`, `livellm_gpus`.
 
 Every resource can say where it runs (`placement_strategy`, `placement_region`,
 `placement_host`): left out, LiveLLM picks the host; a region runs it on any of

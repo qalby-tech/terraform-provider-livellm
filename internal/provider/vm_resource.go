@@ -145,6 +145,7 @@ func (r *vmResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp 
 					"machine at its next restart. Left out, the machine keeps what it has; [] removes them.",
 				PlanModifiers: []planmodifier.List{keepWhenLeftOut{}},
 			},
+			"gpu": gpuRefAttribute("machine"),
 			"time_zone": schema.StringAttribute{
 				Optional: true,
 				Computed: true,
@@ -322,6 +323,7 @@ type vmResourceModel struct {
 	MixedSpeeds       types.Bool     `tfsdk:"mixed_speeds"`
 	Devices           types.List     `tfsdk:"devices"`
 	TimeZone          types.String   `tfsdk:"time_zone"`
+	GPU               types.String   `tfsdk:"gpu"`
 	PortGroups        types.List     `tfsdk:"port_groups"`
 	Username          types.String   `tfsdk:"username"`
 	PasswordWO        types.String   `tfsdk:"password_wo"`
@@ -596,6 +598,7 @@ func vmSpec(ctx context.Context, m vmResourceModel, wr vmWrite) map[string]any {
 		vmPrivateSpec(m, spec)
 	}
 	vmDevicesSpec(wr.devices, spec)
+	gpuRefSpec(m.GPU, spec)
 	if groups := portGroupsSpec(ctx, wr.portGroups); groups != nil {
 		spec["portGroups"] = groups
 	}
@@ -713,6 +716,7 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, wr
 		if m.TimeZone.IsUnknown() {
 			m.TimeZone = types.StringNull()
 		}
+		settleGPURef(&m.GPU, nil)
 		settleVMPrivate(m, nil, diags)
 		return
 	}
@@ -726,6 +730,7 @@ func refreshVMSpec(ctx context.Context, c *client.Client, m *vmResourceModel, wr
 	settleVMDevices(m, w.VM, sentDevices, diags)
 	settleVMPortGroups(ctx, m, w.VM, sentGroups, diags)
 	settleVMTimeZone(m, w.VM, diags)
+	settleGPURef(&m.GPU, w.VM)
 	settleVMPrivate(m, w.VM, diags)
 }
 
@@ -915,6 +920,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	readVMSizes(&state, sp)
 	readVMCores(&state, sp)
 	state.Devices = readVMDevices(sp)
+	state.GPU = readGPURef(state.GPU, sp)
 	state.TimeZone = refreshVMTimeZone(state.TimeZone, sp)
 	refreshVMPrivate(&state, sp)
 	state.PortGroups = readPortGroups(sp)

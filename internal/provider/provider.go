@@ -101,6 +101,7 @@ func (p *livellmProvider) Resources(_ context.Context) []func() resource.Resourc
 		NewBrowserAPIResource,
 		NewDesktopAppResource,
 		NewAlertSettingsResource,
+		NewGPURentalResource,
 	}
 }
 
@@ -112,5 +113,7 @@ func (p *livellmProvider) DataSources(_ context.Context) []func() datasource.Dat
 		NewHostsDataSource,
 		NewMachineCoresDataSource,
 		NewMachineDevicesDataSource,
+		NewGPUModelsDataSource,
+		NewGPUsDataSource,
 	}
 }

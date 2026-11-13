@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.23.0
+
+- **GPU rentals.** `livellm_gpu_rental` rents one GPU (`model` and `use`:
+  `machine` or `apps`) or a cluster of GPUs on one server (a `cluster` block:
+  `use`, `cards = { rtx5090 = 2 }`, `location`), now or booked for later
+  (`starts_at` and `ends_at`, whole UTC hours checked at plan time; a
+  booking's `target`). It reads back `status`, `phase`, `host`, `region`, its
+  `cards`, `used_by` and its hours and cents this month.
+- **Never rented again by itself.** A rental that ended stays in state as
+  `ended` (or `cancelled`) and plans no change; one that drops out of the
+  platform's list (ended rentals are listed 30 days) stays too. A later
+  `ends_at` extends in place, another `use` changes it in place (the apply
+  waits while the GPU switches, `timeouts.update`), fewer GPUs of a model in
+  a cluster takes them off in place (one that isn't working first). Another
+  model, more GPUs, an earlier end, another start, location or target is an
+  error at plan time, never a replacement: taint it to rent anew on purpose.
+- **Charged cancels need consent.** Destroy releases the rental or cancels
+  the booking and says what it is charged in all. A booking within 24 hours
+  of its start is charged in full: the destroy (and taking booked GPUs off a
+  cluster) stops with an error unless `allow_charged_cancel = true` was
+  applied first, and the plan warns ahead of it.
+- **`gpu` on `livellm_vm`, `livellm_container_app` and
+  `livellm_desktop_app`**: a rental's id (`g-…`). Left out, the resource
+  keeps what it has; `""` takes the GPU off.
+- Data sources `livellm_gpu_models` (prices an hour, free now, how long a
+  rental could last, free GPUs per hour with `from`, `to` and `use`) and
+  `livellm_gpus` (the workspace's rentals).
+- Refusals in plain words: "GPU renting isn't offered on this server" where
+  the rent routes answer 404; an agent sign-in can never rent, a key needs the
+  billing permission; 402, 409 and 422 in the platform's words with their code
+  (a payment link is never printed).
+- Needs LiveLLM API 0.98 or newer for renting, 0.101 for clusters of several
+  GPUs.
+
 ## 0.22.0
 
 - **Alert settings.** `livellm_alert_settings` sets which alerts one

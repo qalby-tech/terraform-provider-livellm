@@ -64,6 +64,7 @@ func (r *desktopAppResource) Schema(ctx context.Context, _ resource.SchemaReques
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"dedicated_cores": dedicatedCoresAttribute(""),
+			"gpu":             gpuRefAttribute("Desktop App"),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -137,6 +138,7 @@ type desktopAppModel struct {
 	Image             types.String   `tfsdk:"image"`
 	CPU               types.String   `tfsdk:"cpu"`
 	DedicatedCores    types.Bool     `tfsdk:"dedicated_cores"`
+	GPU               types.String   `tfsdk:"gpu"`
 	Memory            types.String   `tfsdk:"memory"`
 	Resolution        types.String   `tfsdk:"resolution"`
 	KeepFiles         types.Bool     `tfsdk:"keep_files"`
@@ -177,6 +179,7 @@ func desktopSpec(m desktopAppModel) map[string]any {
 		}
 	}
 	dedicatedSpec(m.DedicatedCores, spec)
+	gpuRefSpec(m.GPU, spec)
 	if m.KeepFiles.ValueBool() {
 		spec["keepFiles"] = true
 		if !m.StorageGi.IsNull() && !m.StorageGi.IsUnknown() {
@@ -207,6 +210,7 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 	m.Image, m.Resolution = str("image"), str("resolution")
 	m.CPU, m.Memory = readSize(d["cpu"]), readSize(d["memory"])
 	m.DedicatedCores = readDedicated(d)
+	m.GPU = readGPURef(m.GPU, d)
 	refreshPlacement(d, &m.PlacementStrategy, &m.PlacementHost, &m.PlacementRegion)
 	m.Database = readMachineDatabases(d)
 	keep, _ := d["keepFiles"].(bool)
@@ -219,6 +223,7 @@ func readDesktopSpec(m *desktopAppModel, w *client.Workload) {
 func settleDesktopSizes(m *desktopAppModel, d map[string]any) {
 	m.CPU, m.Memory = settleString(m.CPU, d["cpu"]), settleString(m.Memory, d["memory"])
 	m.DedicatedCores = settleDedicated(m.DedicatedCores, d)
+	settleGPURef(&m.GPU, d)
 	m.StorageGi = settleInt64(m.StorageGi, readGi(types.Int64Null(), d["storageSize"]))
 }
 

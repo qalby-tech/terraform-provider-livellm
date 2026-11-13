@@ -329,6 +329,7 @@ shrink another resource, or give this one fewer cores or less memory.
 - `command` (List of String) Entrypoint override.
 - `cpu` (String) CPU request, e.g. `500m`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
 - `dedicated_cores` (Boolean) Whole cores of its server for it alone, all of `cpu`, instead of shared cores (the default): a quarter of `cpu` reserved, all of it usable, and slower when the server is busy. On servers whose cores have 2 threads, dedicated cores come in pairs (2, 4, 6…), and the platform refuses another count at apply, in its own words. A dedicated core counts as 2 of the plan's cores (and as 2 cores on pay as you go). For one copy only, for now: the platform refuses them for an app of more copies, at apply, in its own words. Left out, it keeps what it has, the console's choice included (`false` on a new one); `false` makes them shared.
+- `gpu` (String) A GPU rental of the workspace this app uses: [`livellm_gpu_rental`](gpu_rental.md)'s `id` (`g-…`), one for apps (`use = "apps"`), which apps and Desktop Apps share. Left out, it keeps what it has (none on a new one); `""` takes the GPU off. The platform refuses a rental for a machine or an unknown one, in its own words.
 - `memory` (String) Memory request, e.g. `512Mi`. Left out, the platform's default is read back (no plan to change it); removing it later keeps the size the app has.
 - `env` (Map of String) Plain environment variables.
 - `secret_env` (Map of String, Sensitive) Environment variables with secret

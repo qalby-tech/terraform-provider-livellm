@@ -77,6 +77,7 @@ func (r *containerAppResource) Schema(ctx context.Context, _ resource.SchemaRequ
 				PlanModifiers: []planmodifier.String{keepSizeWhenUnset{}},
 			},
 			"dedicated_cores": dedicatedCoresAttribute(" For one copy only, for now: the platform refuses them for an app of more copies, at apply."),
+			"gpu":             gpuRefAttribute("app"),
 			"memory": schema.StringAttribute{
 				Optional:      true,
 				Computed:      true,
@@ -378,6 +379,7 @@ type containerAppModel struct {
 	Command           types.List      `tfsdk:"command"`
 	CPU               types.String    `tfsdk:"cpu"`
 	DedicatedCores    types.Bool      `tfsdk:"dedicated_cores"`
+	GPU               types.String    `tfsdk:"gpu"`
 	Memory            types.String    `tfsdk:"memory"`
 	Env               types.Map       `tfsdk:"env"`
 	SecretEnv         types.Map       `tfsdk:"secret_env"`
@@ -821,6 +823,7 @@ func containerAppSpec(ctx context.Context, m containerAppModel, sendToken bool) 
 		spec["cpu"] = v
 	}
 	dedicatedSpec(m.DedicatedCores, spec)
+	gpuRefSpec(m.GPU, spec)
 	if v := m.Memory.ValueString(); v != "" {
 		spec["memory"] = v
 	}
@@ -1145,13 +1148,14 @@ func readPorts(prev types.List, sp map[string]any) types.List {
 // whose configuration leaves them out; planned ones stay as planned.
 func settleAppSizes(ctx context.Context, c *client.Client, m *containerAppModel) {
 	var sp map[string]any
-	if m.CPU.IsUnknown() || m.Memory.IsUnknown() || m.DedicatedCores.IsUnknown() {
+	if m.CPU.IsUnknown() || m.Memory.IsUnknown() || m.DedicatedCores.IsUnknown() || m.GPU.IsUnknown() {
 		if w := fetchWorkload(ctx, c, m.Name.ValueString()); w != nil {
 			sp = w.Pod
 		}
 	}
 	m.CPU, m.Memory = settleString(m.CPU, sp["cpu"]), settleString(m.Memory, sp["memory"])
 	m.DedicatedCores = settleDedicated(m.DedicatedCores, sp)
+	settleGPURef(&m.GPU, sp)
 }
 
 func refreshAppStatus(ctx context.Context, c *client.Client, name string, m *containerAppModel, diags *diag.Diagnostics) {
@@ -1282,6 +1286,7 @@ func (r *containerAppResource) Read(ctx context.Context, req resource.ReadReques
 	state.ImageAuth = readImageAuth(state.ImageAuth, sp["imageAuth"])
 	state.CPU, state.Memory = readSize(sp["cpu"]), readSize(sp["memory"])
 	state.DedicatedCores = readDedicated(sp)
+	state.GPU = readGPURef(state.GPU, sp)
 	env, _ := sp["env"].([]any)
 	state.Env = readEnvMap(state.Env, env, true)
 	secretEnv, _ := sp["secretEnv"].([]any)

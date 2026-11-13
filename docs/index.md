@@ -53,12 +53,14 @@ configuration; keys are secrets.
 | [`livellm_browser_api`](resources/browser_api.md) | One address that drives several browsers, Chrome and Camoufox together |
 | [`livellm_desktop_app`](resources/desktop_app.md) | A Linux desktop in a container that starts in seconds |
 | [`livellm_alert_settings`](resources/alert_settings.md) | Which alerts one resource gets (down, CPU, memory, disk, GPU) and at what level |
+| [`livellm_gpu_rental`](resources/gpu_rental.md) | A GPU, or a cluster of GPUs on one server, rented by the hour or booked for later, for a machine or shared by apps |
 
 Data sources: [`livellm_workspace`](data-sources/workspace.md),
 [`livellm_vm`](data-sources/vm.md), [`livellm_vms`](data-sources/vms.md),
 [`livellm_hosts`](data-sources/hosts.md),
 [`livellm_machine_cores`](data-sources/machine_cores.md),
-[`livellm_machine_devices`](data-sources/machine_devices.md).
+[`livellm_machine_devices`](data-sources/machine_devices.md),
+[`livellm_gpu_models`](data-sources/gpu_models.md), [`livellm_gpus`](data-sources/gpus.md).
 
 Every resource can say where it runs with `placement_strategy`,
 `placement_region` and `placement_host`. Left out, LiveLLM picks the host (the

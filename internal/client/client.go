@@ -100,11 +100,18 @@ func (e *APIError) Count(key string) (int, bool) {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+	_, err := c.doStatus(ctx, method, path, in, out)
+	return err
+}
+
+// doStatus is do that also answers the 2xx status the platform sent (202
+// where a change is still under way).
+func (c *Client) doStatus(ctx context.Context, method, path string, in, out any) (int, error) {
 	var payload []byte
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		payload = b
 	}
@@ -115,7 +122,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		}
 		req, err := http.NewRequestWithContext(ctx, method, c.endpoint+path, body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		req.Header.Set("x-api-key", c.apiKey)
 		if in != nil {
@@ -123,7 +130,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		}
 		res, err := c.http.Do(req)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 		res.Body.Close()
@@ -138,19 +145,19 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 				select {
 				case <-ctx.Done():
 					t.Stop()
-					return ctx.Err()
+					return 0, ctx.Err()
 				case <-t.C:
 				}
 				continue
 			}
 		}
 		if res.StatusCode < 200 || res.StatusCode > 299 {
-			return &APIError{Status: res.StatusCode, Body: strings.TrimSpace(string(raw))}
+			return res.StatusCode, &APIError{Status: res.StatusCode, Body: strings.TrimSpace(string(raw))}
 		}
 		if out != nil {
-			return json.Unmarshal(raw, out)
+			return res.StatusCode, json.Unmarshal(raw, out)
 		}
-		return nil
+		return res.StatusCode, nil
 	}
 }
 
