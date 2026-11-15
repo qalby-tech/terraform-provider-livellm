@@ -115,5 +115,6 @@ func (p *livellmProvider) DataSources(_ context.Context) []func() datasource.Dat
 		NewMachineDevicesDataSource,
 		NewGPUModelsDataSource,
 		NewGPUsDataSource,
+		NewGPUDriverDataSource,
 	}
 }

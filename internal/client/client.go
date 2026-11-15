@@ -483,3 +483,21 @@ func (e *APIError) RouteMissing() bool {
 	var b map[string]any
 	return json.Unmarshal([]byte(e.Body), &b) != nil
 }
+
+// GPUDriver is a machine's NVIDIA driver (GET /v1/workloads/{id}/gpu-driver):
+// its state (none, off, working, restart-needed, installing, pending, failed,
+// unsupported, not-installed, unknown), a detail and the end of its log.
+type GPUDriver struct {
+	State  string   `json:"state"`
+	Detail string   `json:"detail"`
+	Log    []string `json:"log"`
+}
+
+// GPUDriver reads a running machine's NVIDIA driver.
+func (c *Client) GPUDriver(ctx context.Context, id string) (*GPUDriver, error) {
+	var d GPUDriver
+	if err := c.do(ctx, http.MethodGet, "/v1/workloads/"+id+"/gpu-driver", nil, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}

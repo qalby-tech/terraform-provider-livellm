@@ -2,6 +2,11 @@
 
 ## 0.23.0
 
+- **`data.livellm_gpu_driver`** reads a machine's NVIDIA driver (`state`:
+  working, installing, restart-needed, failed, none…; `detail`; `log`).
+  Machines install it by themselves; a stopped or unreachable machine reads as
+  `machine-stopped` or `machine-unreachable`, never a failed plan. Needs
+  LiveLLM API 0.101.9 or newer.
 - **GPU rentals.** `livellm_gpu_rental` rents one GPU (`model` and `use`:
   `machine` or `apps`) or a cluster of GPUs on one server (a `cluster` block:
   `use`, `cards = { rtx5090 = 2 }`, `location`), now or booked for later
